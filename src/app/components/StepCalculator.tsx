@@ -306,8 +306,12 @@ export function StepCalculator() {
                             <ImageWithFallback src={item.image} alt={item.name} className="w-full h-full object-cover" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-sm font-medium text-gray-900 mb-0.5 line-clamp-1">{item.name}</h3>
-                            <p className="text-xs text-gray-500 mb-1 line-clamp-1">{item.description}</p>
+                            <h3 className="text-sm font-medium text-gray-900 mb-0.5 line-clamp-1">
+                              {t(`item.${item.id}.name`) !== `item.${item.id}.name` ? t(`item.${item.id}.name`) : item.name}
+                            </h3>
+                            <p className="text-xs text-gray-500 mb-1 line-clamp-1">
+                              {t(`item.${item.id}.desc`) !== `item.${item.id}.desc` ? t(`item.${item.id}.desc`) : item.description}
+                            </p>
                             <p className="text-base font-semibold text-blue-600">₩{item.price.toLocaleString()}</p>
                           </div>
                           <div className="flex-shrink-0">

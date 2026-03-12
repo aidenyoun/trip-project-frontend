@@ -1,7 +1,6 @@
 import React from "react";
 import { createBrowserRouter, Navigate } from "react-router";
 import { BlogPost } from "./components/BlogPost";
-import { Calculator } from "./components/Calculator";
 import { StepCalculator } from "./components/StepCalculator";
 import { KakaoPreview } from "./components/KakaoPreview";
 import { AdminLogin } from "./components/AdminLogin";
@@ -28,10 +27,6 @@ export const router = createBrowserRouter([
       {
         path: "",
         element: <BlogPost />,
-      },
-      {
-        path: "calculator",
-        element: <Calculator />,
       },
       {
         path: "step-calculator",
