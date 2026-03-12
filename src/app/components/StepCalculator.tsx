@@ -269,7 +269,9 @@ export function StepCalculator() {
               <span className="text-xs text-gray-400">/ {STEPS.length}</span>
             </div>
             <h2 className="text-lg font-semibold text-gray-900 mb-1">
-              Select your {currentStepInfo.name} in {t(`city.${selectedCity?.id}`)}
+              {language === 'ko' && `${t(`city.${selectedCity?.id}`)} ${currentStepInfo.name} 선택`}
+              {language === 'en' && `Select your ${currentStepInfo.name} in ${t(`city.${selectedCity?.id}`)}`}
+              {language === 'ja' && `${t(`city.${selectedCity?.id}`)}の${currentStepInfo.name}を選択`}
             </h2>
             <p className="text-sm text-gray-500">
               {t('calc.multiple')}
