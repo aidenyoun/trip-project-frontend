@@ -26,8 +26,15 @@ interface City {
     id: string;
     name: string;
     emoji: string;
+    country_code: string;
     is_active: boolean;
     created_at: string;
+}
+
+interface Country {
+    code: string;
+    name: string;
+    emoji: string;
 }
 
 const CATEGORIES = ['accommodation', 'transport', 'tours', 'activities'];
@@ -44,7 +51,7 @@ const EMPTY_ITEM_FORM = {
     id: '', city: '', category: 'accommodation',
     name: '', description: '', price: 0, image: '', affiliate_link: '', is_active: true
 };
-const EMPTY_CITY_FORM = { id: '', name: '', emoji: '🌏', is_active: true };
+const EMPTY_CITY_FORM = { id: '', name: '', emoji: '🌏', country_code: '', is_active: true };
 
 type Tab = 'items' | 'cities' | 'stats';
 
@@ -88,6 +95,7 @@ export function AdminDashboard() {
     const [editingCity, setEditingCity] = useState<City | null>(null);
     const [cityForm, setCityForm] = useState(EMPTY_CITY_FORM);
     const [savingCity, setSavingCity] = useState(false);
+    const [countries, setCountries] = useState<Country[]>([]);
 
     // ✅ 번역 관련 state (컴포넌트 내부로 이동)
     const [translationStats, setTranslationStats] = useState({
@@ -119,6 +127,12 @@ export function AdminDashboard() {
         setItems(data || []);
         setItemsLoading(false);
     };
+
+    useEffect(() => {
+        supabase.from('countries').select('*').order('name').then(({ data }) => {
+            setCountries(data || []);
+        });
+    }, []);
 
     useEffect(() => { fetchCities(); fetchItems(); }, []);
     useEffect(() => { fetchItems(); }, [sortBy]);
@@ -262,16 +276,16 @@ export function AdminDashboard() {
     const openCreateCityForm = () => { setEditingCity(null); setCityForm(EMPTY_CITY_FORM); setShowCityForm(true); };
     const openEditCityForm = (city: City) => {
         setEditingCity(city);
-        setCityForm({ id: city.id, name: city.name, emoji: city.emoji, is_active: city.is_active });
+        setCityForm({ id: city.id, name: city.name, emoji: city.emoji, country_code: city.country_code || '', is_active: city.is_active });
         setShowCityForm(true);
     };
     const handleSaveCity = async () => {
         if (!cityForm.name || !cityForm.id) return alert('ID와 이름은 필수입니다.');
         setSavingCity(true);
         if (editingCity) {
-            await supabase.from('cities').update({ name: cityForm.name, emoji: cityForm.emoji, is_active: cityForm.is_active }).eq('id', editingCity.id);
+            await supabase.from('cities').update({ name: cityForm.name, emoji: cityForm.emoji, country_code: cityForm.country_code, is_active: cityForm.is_active }).eq('id', editingCity.id);
         } else {
-            await supabase.from('cities').insert({ id: cityForm.id.toLowerCase().replace(/\s+/g, '-'), name: cityForm.name, emoji: cityForm.emoji, is_active: cityForm.is_active });
+            await supabase.from('cities').insert({ id: cityForm.id.toLowerCase().replace(/\s+/g, '-'), name: cityForm.name, emoji: cityForm.emoji, country_code: cityForm.country_code, is_active: cityForm.is_active });
         }
         setSavingCity(false); setShowCityForm(false); fetchCities();
     };
@@ -795,9 +809,23 @@ export function AdminDashboard() {
                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500" />
                             </div>
                             <div>
-                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">이모지 국기</label>
-                                <input value={cityForm.emoji} onChange={e => setCityForm({...cityForm, emoji: e.target.value})} placeholder="🇯🇵"
-                                       className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xl font-bold focus:ring-2 focus:ring-blue-500" />
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">나라 선택</label>
+                                <select
+                                    value={cityForm.country_code}
+                                    onChange={e => {
+                                        const selected = countries.find(c => c.code === e.target.value);
+                                        setCityForm({ ...cityForm, country_code: e.target.value, emoji: selected?.emoji || '🌏' });
+                                    }}
+                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="">나라를 선택하세요</option>
+                                    {countries.map(c => (
+                                        <option key={c.code} value={c.code}>{c.emoji} {c.name}</option>
+                                    ))}
+                                </select>
+                                {cityForm.emoji && (
+                                    <p className="text-xs text-gray-400 mt-1.5 ml-1">선택된 국기: <span className="text-xl">{cityForm.emoji}</span></p>
+                                )}
                             </div>
                             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
                                 <div>
