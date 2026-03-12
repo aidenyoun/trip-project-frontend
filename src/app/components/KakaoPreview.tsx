@@ -72,7 +72,7 @@ export function KakaoPreview() {
     }
   };
 
-  // 카카오톡 공유 — 각 품목 링크를 제휴링크로 연결
+  // 카카오톡 공유
   const handleKakaoShare = () => {
     if (!window.Kakao?.isInitialized()) {
       alert('카카오 SDK가 로드되지 않았습니다. 잠시 후 다시 시도해주세요.');
@@ -80,28 +80,43 @@ export function KakaoPreview() {
     }
 
     setSharing(true);
-    const topItems = selectedItems.slice(0, 3);
     const baseUrl = window.location.origin;
+    
+    // 선택된 아이템들을 텍스트 리스트로 변환
+    const itemsText = selectedItems
+      .slice(0, 5)
+      .map(item => `• ${item.name}: ₩${item.price.toLocaleString()}`)
+      .join('\n');
+    
+    const moreText = selectedItems.length > 5 ? `\n외 ${selectedItems.length - 5}개 항목 더보기` : '';
+    const mainItem = selectedItems[0];
 
     try {
+      // 리스트 템플릿 대신 피드 템플릿 사용 (클릭 시 전체 페이지로 이동 유도)
       window.Kakao.Share.sendDefault({
-        objectType: 'list',
-        headerTitle: `✈️ ${selectedCityName} 여행 견적서`,
-        headerLink: {
-          mobileWebUrl: `${baseUrl}/kakao-preview`,
-          webUrl: `${baseUrl}/kakao-preview`,
-        },
-        contents: topItems.map(item => ({
-          title: item.name,
-          description: `${item.description} · ₩${item.price.toLocaleString()} (참고가)`,
-          imageUrl: item.image,
+        objectType: 'feed',
+        content: {
+          title: `✈️ ${selectedCityName} 여행 견적서`,
+          description: `${itemsText}${moreText}\n\n총 예상 비용: ₩${totalPrice.toLocaleString()}`,
+          imageUrl: mainItem?.image || 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80',
           link: {
-            // 제휴링크가 있으면 제휴링크로, 없으면 메인 페이지로
-            mobileWebUrl: item.affiliate_link || `${baseUrl}/step-calculator`,
-            webUrl: item.affiliate_link || `${baseUrl}/step-calculator`,
+            mobileWebUrl: `${baseUrl}/kakao-preview`,
+            webUrl: `${baseUrl}/kakao-preview`,
           },
-        })),
+        },
+        social: {
+          likeCount: 10,
+          commentCount: 20,
+          sharedCount: 30,
+        },
         buttons: [
+          {
+            title: '상세 견적 보기',
+            link: {
+              mobileWebUrl: `${baseUrl}/kakao-preview`,
+              webUrl: `${baseUrl}/kakao-preview`,
+            },
+          },
           {
             title: '나도 견적 받기',
             link: {

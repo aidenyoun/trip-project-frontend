@@ -223,10 +223,16 @@ export function StepCalculator() {
                 const isCompleted = index < currentStep;
                 return (
                     <div key={step.id} className="flex items-center flex-1">
-                      <div className="flex flex-col items-center flex-1">
+                      <div 
+                        className="flex flex-col items-center flex-1 cursor-pointer group"
+                        onClick={() => {
+                          setCurrentStep(index);
+                          window.scrollTo(0, 0);
+                        }}
+                      >
                         <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs transition-all mb-1 ${
                             isActive ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md scale-110'
-                                : isCompleted ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'
+                                : isCompleted ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400 group-hover:bg-gray-300'
                         }`}>
                           {isCompleted ? <Check className="w-3.5 h-3.5" /> : <span>{index + 1}</span>}
                         </div>
@@ -275,9 +281,15 @@ export function StepCalculator() {
           ) : filteredItems.length === 0 ? (
               <div className="text-center py-12 text-gray-400 text-sm">
                 이 카테고리에 등록된 항목이 없습니다.
+                <button
+                    onClick={handleNext}
+                    className="block mx-auto mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg text-sm"
+                >
+                  다음 단계로 이동
+                </button>
               </div>
           ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 pb-6">
                 {filteredItems.map(item => {
                   const isSelected = selectedItems.has(item.id);
                   return (
@@ -308,6 +320,17 @@ export function StepCalculator() {
                       </div>
                   );
                 })}
+
+                {/* 카테고리별 하단 넘김 버튼 */}
+                <button
+                    onClick={handleNext}
+                    className="w-full mt-4 py-4 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center gap-2 group hover:bg-gray-100 transition-all active:scale-[0.98]"
+                >
+                  <span className="text-sm font-semibold text-gray-600 group-hover:text-blue-600 transition-colors">
+                    {canProceed ? '선택 완료, 다음으로' : '이 단계 건너뛰기'}
+                  </span>
+                  <ArrowLeft className="w-4 h-4 rotate-180 text-gray-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
+                </button>
               </div>
           )}
 
@@ -330,18 +353,17 @@ export function StepCalculator() {
             </div>
             <button
                 onClick={handleNext}
-                disabled={!canProceed}
-                className={`w-full py-3 rounded-xl text-white text-sm font-medium transition-all ${
+                className={`w-full py-3 rounded-xl text-white text-sm font-medium transition-all shadow-md active:scale-[0.99] ${
                     !canProceed
-                        ? 'bg-gray-300 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 active:scale-[0.99] shadow-md'
+                        ? 'bg-gray-400 hover:bg-gray-500'
+                        : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700'
                 }`}
             >
-              {currentStep < STEPS.length - 1 ? `Next Step: ${STEPS[currentStep + 1].name}` : 'Complete & View Summary'}
+              {currentStep < STEPS.length - 1 
+                ? (canProceed ? `Next: ${STEPS[currentStep + 1].name}` : 'Skip to next step')
+                : (canProceed ? 'Complete & View Summary' : 'Finish & View Summary')
+              }
             </button>
-            {!canProceed && (
-                <p className="text-xs text-center text-gray-400 mt-1">Please select at least one item to continue</p>
-            )}
           </div>
         </div>
       </div>
