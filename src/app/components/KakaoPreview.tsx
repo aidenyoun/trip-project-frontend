@@ -28,20 +28,21 @@ export function KakaoPreview() {
   const [selectedCity, setSelectedCity] = useState('');
   const [sharing, setSharing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [shareId, setShareId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       const params = new URLSearchParams(window.location.search);
-      const shareId = params.get('share');
+      const sId = params.get('share');
 
-      if (shareId) {
-        // 1. URL에 공유 ID가 있는 경우: DB에서 데이터 로드
+      if (sId) {
+        // 1. 공유 링크로 접속한 경우: DB에서 데이터 로드
         try {
           const { data, error } = await supabase
             .from('shares')
             .select('*')
-            .eq('id', shareId)
+            .eq('id', sId)
             .single();
 
           if (error) throw error;
@@ -51,22 +52,43 @@ export function KakaoPreview() {
             setTotalPrice(data.total_price);
             setSelectedCityName(data.city_name);
             setSelectedCity(data.city_id);
+            setShareId(sId);
           }
         } catch (error) {
           console.error('공유 데이터를 불러오는데 실패했습니다:', error);
           alert('만료되었거나 잘못된 공유 링크입니다.');
         }
       } else {
-        // 2. 일반 접속인 경우: localStorage에서 데이터 로드
+        // 2. 일반 접속인 경우: localStorage에서 데이터 로드 및 DB 미리 저장
         const items = localStorage.getItem('selectedItems');
         const price = localStorage.getItem('totalPrice');
         const city = localStorage.getItem('selectedCity');
         const cityName = localStorage.getItem('selectedCityName');
 
-        if (items) setSelectedItems(JSON.parse(items));
-        if (price) setTotalPrice(parseInt(price));
-        if (city) setSelectedCity(city);
-        if (cityName) setSelectedCityName(cityName);
+        if (items && price && city && cityName) {
+          const parsedItems = JSON.parse(items);
+          setSelectedItems(parsedItems);
+          setTotalPrice(parseInt(price));
+          setSelectedCity(city);
+          setSelectedCityName(cityName);
+
+          // 모바일 앱 차단 방지를 위해 여기서 미리 shareId를 생성해둡니다.
+          try {
+            const { data } = await supabase
+              .from('shares')
+              .insert({
+                selected_items: parsedItems,
+                total_price: parseInt(price),
+                city_name: cityName,
+                city_id: city
+              })
+              .select()
+              .single();
+            if (data) setShareId(data.id);
+          } catch (e) {
+            console.error('Share ID 생성 실패:', e);
+          }
+        }
       }
       setLoading(false);
     };
@@ -106,35 +128,24 @@ export function KakaoPreview() {
     }
   };
 
-  // 카카오톡 공유 — 각 품목 링크를 제휴링크로 연결
-  const handleKakaoShare = async () => {
+  // 카카오톡 공유 — 이제 동기적으로 즉시 실행됩니다 (모바일 차단 방지)
+  const handleKakaoShare = () => {
     if (!window.Kakao?.isInitialized()) {
       alert('카카오 SDK가 로드되지 않았습니다. 잠시 후 다시 시도해주세요.');
       return;
     }
 
+    if (!shareId) {
+      alert('공유 링크를 생성 중입니다. 1~2초 후 다시 시도해주세요.');
+      return;
+    }
+
     setSharing(true);
+    const baseUrl = window.location.origin;
+    const shareUrl = `${baseUrl}/kakao-preview?share=${shareId}`;
+    const topItems = selectedItems.slice(0, 3);
+
     try {
-      // 1. Supabase 'shares' 테이블에 현재 견적 정보 저장
-      const { data: shareData, error } = await supabase
-        .from('shares')
-        .insert({
-          selected_items: selectedItems,
-          total_price: totalPrice,
-          city_name: selectedCityName,
-          city_id: selectedCity
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      const shareId = shareData.id;
-      const baseUrl = window.location.origin;
-      const shareUrl = `${baseUrl}/kakao-preview?share=${shareId}`;
-
-      const topItems = selectedItems.slice(0, 3);
-
       window.Kakao.Share.sendDefault({
         objectType: 'list',
         headerTitle: `✈️ ${selectedCityName} 여행 견적서`,
@@ -169,8 +180,8 @@ export function KakaoPreview() {
         ],
       });
     } catch (e) {
-      console.error('공유 실패:', e);
-      alert('공유 링크 생성 중 오류가 발생했습니다.');
+      console.error('카카오 공유 실패:', e);
+      alert('공유 중 오류가 발생했습니다.');
     } finally {
       setSharing(false);
     }
