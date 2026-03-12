@@ -46,120 +46,8 @@ const EMPTY_ITEM_FORM = {
 };
 const EMPTY_CITY_FORM = { id: '', name: '', emoji: '🌏', is_active: true };
 
-const [translationStats, setTranslationStats] = useState({
-    total: 0, translated_en: 0, translated_ja: 0
-});
-const [translating, setTranslating] = useState(false);
-
-useEffect(() => {
-    const fetchStats = async () => {
-        const { count: total } = await supabase
-            .from("items").select("*", { count: "exact", head: true });
-        const { count: en } = await supabase
-            .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "en");
-        const { count: ja } = await supabase
-            .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "ja");
-
-        setTranslationStats({
-            total: total || 0,
-            translated_en: en || 0,
-            translated_ja: ja || 0,
-        });
-    };
-    fetchStats();
-}, []);
-
-const handleBatchTranslate = async () => {
-    setTranslating(true);
-    try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const response = await fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${session?.access_token}`,
-                },
-                body: JSON.stringify({ batch: true }),
-            }
-        );
-        const result = await response.json();
-        alert(`번역 완료: ${result.results?.length || 0}개 항목`);
-    } catch (e) {
-        alert("번역 중 오류 발생");
-    } finally {
-        setTranslating(false);
-    }
-};
-
-// 새 아이템 등록 시 자동 번역 트리거
-const handleAddItem = async (itemData: Omit<TravelItem, 'id'>) => {
-    const { data: newItem } = await supabase
-        .from("items")
-        .insert(itemData)
-        .select()
-        .single();
-
-    if (newItem) {
-        // 자동 번역 트리거 (백그라운드)
-        const { data: { session } } = await supabase.auth.getSession();
-        fetch(
-            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${session?.access_token}`,
-                },
-                body: JSON.stringify({ item_id: newItem.id }),
-            }
-        ).catch(console.error); // 에러가 나도 UI 블로킹 없음
-    }
-};
-
-// AdminDashboard JSX에 추가할 번역 현황 카드
-const TranslationPanel = () => (
-    <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-        <h2 className="text-lg font-bold text-gray-900 mb-4">🌐 번역 현황</h2>
-        <div className="grid grid-cols-3 gap-4 mb-4">
-            <div className="text-center p-3 bg-gray-50 rounded-xl">
-                <p className="text-2xl font-black text-gray-900">{translationStats.total}</p>
-                <p className="text-xs text-gray-500 mt-1">전체 아이템</p>
-            </div>
-            <div className="text-center p-3 bg-blue-50 rounded-xl">
-                <p className="text-2xl font-black text-blue-600">{translationStats.translated_en}</p>
-                <p className="text-xs text-blue-400 mt-1">영어 번역 완료</p>
-            </div>
-            <div className="text-center p-3 bg-red-50 rounded-xl">
-                <p className="text-2xl font-black text-red-500">{translationStats.translated_ja}</p>
-                <p className="text-xs text-red-400 mt-1">일본어 번역 완료</p>
-            </div>
-        </div>
-
-        {/* 미번역 아이템이 있을 때만 버튼 표시 */}
-        {(translationStats.translated_en < translationStats.total ||
-            translationStats.translated_ja < translationStats.total) && (
-            <button
-                onClick={handleBatchTranslate}
-                disabled={translating}
-                className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
-            >
-                {translating
-                    ? "번역 중... (시간이 걸릴 수 있습니다)"
-                    : `미번역 ${translationStats.total - Math.min(translationStats.translated_en, translationStats.translated_ja)}개 일괄 번역`}
-            </button>
-        )}
-        {translationStats.translated_en >= translationStats.total &&
-            translationStats.translated_ja >= translationStats.total && (
-                <p className="text-center text-sm text-green-600 font-medium">✅ 모든 아이템 번역 완료</p>
-            )}
-    </div>
-);
-
 type Tab = 'items' | 'cities' | 'stats';
 
-// ── 이미지 URL → Supabase Storage 업로드 ──
 const BUCKET = 'item-images';
 
 async function uploadImageToStorage(imageUrl: string, itemId: string): Promise<string> {
@@ -201,6 +89,12 @@ export function AdminDashboard() {
     const [cityForm, setCityForm] = useState(EMPTY_CITY_FORM);
     const [savingCity, setSavingCity] = useState(false);
 
+    // ✅ 번역 관련 state (컴포넌트 내부로 이동)
+    const [translationStats, setTranslationStats] = useState({
+        total: 0, translated_en: 0, translated_ja: 0
+    });
+    const [translating, setTranslating] = useState(false);
+
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
             if (!session) navigate('/admin');
@@ -224,9 +118,53 @@ export function AdminDashboard() {
     useEffect(() => { fetchCities(); fetchItems(); }, []);
     useEffect(() => { fetchItems(); }, [sortBy]);
 
+    // ✅ 번역 현황 fetch (컴포넌트 내부로 이동)
+    useEffect(() => {
+        const fetchStats = async () => {
+            const { count: total } = await supabase
+                .from("items").select("*", { count: "exact", head: true });
+            const { count: en } = await supabase
+                .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "en");
+            const { count: ja } = await supabase
+                .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "ja");
+
+            setTranslationStats({
+                total: total || 0,
+                translated_en: en || 0,
+                translated_ja: ja || 0,
+            });
+        };
+        fetchStats();
+    }, []);
+
     const handleLogout = async () => {
         await supabase.auth.signOut();
         navigate('/admin');
+    };
+
+    // ✅ 일괄 번역 handler (컴포넌트 내부로 이동)
+    const handleBatchTranslate = async () => {
+        setTranslating(true);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const response = await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${session?.access_token}`,
+                    },
+                    body: JSON.stringify({ batch: true }),
+                }
+            );
+            const result = await response.json();
+            alert(`번역 완료: ${result.results?.length || 0}개 항목`);
+        } catch (e) {
+            alert("번역 중 오류 발생");
+        } finally {
+            setTranslating(false);
+        }
     };
 
     // ── 기존 외부 링크 이미지 일괄 마이그레이션 ──
@@ -253,11 +191,9 @@ export function AdminDashboard() {
             const newUrl = await uploadImageToStorage(item.image, item.id);
 
             if (newUrl !== item.image) {
-                // URL이 바뀐 경우 = 성공 → DB 업데이트
                 const { error } = await supabase.from('items').update({ image: newUrl }).eq('id', item.id);
                 if (error) { failCount++; } else { successCount++; }
             } else {
-                // URL 그대로 = 실패
                 failCount++;
             }
         }
@@ -318,7 +254,24 @@ export function AdminDashboard() {
         }
         const payload = { city: itemForm.city, category: itemForm.category, name: itemForm.name, description: itemForm.description, price: Number(itemForm.price), image: finalImageUrl, affiliate_link: itemForm.affiliate_link || null, is_active: itemForm.is_active };
         if (editingItem) { await supabase.from('items').update(payload).eq('id', editingItem.id); }
-        else { await supabase.from('items').insert({ id: itemId, ...payload }); }
+        else {
+            const { data: newItem } = await supabase.from('items').insert({ id: itemId, ...payload }).select().single();
+            // ✅ 새 아이템 등록 시 자동 번역 트리거 (백그라운드)
+            if (newItem) {
+                const { data: { session } } = await supabase.auth.getSession();
+                fetch(
+                    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`,
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${session?.access_token}`,
+                        },
+                        body: JSON.stringify({ item_id: newItem.id }),
+                    }
+                ).catch(console.error);
+            }
+        }
         setSavingItem(false); setShowItemForm(false); fetchItems();
     };
     const handleDeleteItem = async (id: string) => {
@@ -403,6 +356,43 @@ export function AdminDashboard() {
     const topItems = [...items].sort((a, b) => b.click_count - a.click_count).slice(0, 5);
     const cityLabels = Object.fromEntries(cities.map(c => [c.id, c.name]));
 
+    // ✅ TranslationPanel 컴포넌트 (내부 정의로 state 접근 가능)
+    const TranslationPanel = () => (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">🌐 번역 현황</h2>
+            <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="text-center p-3 bg-gray-50 rounded-xl">
+                    <p className="text-2xl font-black text-gray-900">{translationStats.total}</p>
+                    <p className="text-xs text-gray-500 mt-1">전체 아이템</p>
+                </div>
+                <div className="text-center p-3 bg-blue-50 rounded-xl">
+                    <p className="text-2xl font-black text-blue-600">{translationStats.translated_en}</p>
+                    <p className="text-xs text-blue-400 mt-1">영어 번역 완료</p>
+                </div>
+                <div className="text-center p-3 bg-red-50 rounded-xl">
+                    <p className="text-2xl font-black text-red-500">{translationStats.translated_ja}</p>
+                    <p className="text-xs text-red-400 mt-1">일본어 번역 완료</p>
+                </div>
+            </div>
+            {(translationStats.translated_en < translationStats.total ||
+                translationStats.translated_ja < translationStats.total) && (
+                <button
+                    onClick={handleBatchTranslate}
+                    disabled={translating}
+                    className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+                >
+                    {translating
+                        ? "번역 중... (시간이 걸릴 수 있습니다)"
+                        : `미번역 ${translationStats.total - Math.min(translationStats.translated_en, translationStats.translated_ja)}개 일괄 번역`}
+                </button>
+            )}
+            {translationStats.translated_en >= translationStats.total &&
+                translationStats.translated_ja >= translationStats.total && (
+                    <p className="text-center text-sm text-green-600 font-medium">✅ 모든 아이템 번역 완료</p>
+                )}
+        </div>
+    );
+
     return (
         <div className="min-h-screen bg-gray-50">
             <div className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
@@ -433,6 +423,9 @@ export function AdminDashboard() {
                 {tab === 'items' && (
                     <div className="space-y-4">
 
+                        {/* ── 번역 현황 패널 ── */}
+                        <TranslationPanel />
+
                         {/* ── 외부 링크 이미지 경고 + 일괄 이전 버튼 ── */}
                         {externalImageCount > 0 && !isBulkUploading && (
                             <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 flex items-center gap-4">
@@ -455,7 +448,7 @@ export function AdminDashboard() {
                             </div>
                         )}
 
-                        {/* 진행 상황 바 (업로드 & 마이그레이션 공용) */}
+                        {/* 진행 상황 바 */}
                         {isBulkUploading && bulkProgress && (
                             <div className="bg-white border border-blue-200 rounded-2xl p-4">
                                 <div className="flex items-center gap-3 mb-3">
