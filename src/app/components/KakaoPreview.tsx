@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { supabase } from "../../supabase";
+import { useLanguage } from "../LanguageContext";
 
 declare global {
   interface Window {
@@ -22,6 +23,8 @@ interface TravelItem {
 
 export function KakaoPreview() {
   const navigate = useNavigate();
+  const { lang } = useParams<{ lang: string }>();
+  const { t } = useLanguage();
   const [selectedItems, setSelectedItems] = useState<TravelItem[]>([]);
   const [totalPrice, setTotalPrice] = useState(0);
   const [selectedCityName, setSelectedCityName] = useState('');
@@ -112,13 +115,13 @@ export function KakaoPreview() {
 
     setSharing(true);
     const baseUrl = window.location.origin;
-    const shareUrl = `${baseUrl}/kakao-preview?share=${shareId}`;
+    const shareUrl = `${baseUrl}/${lang}/kakao-preview?share=${shareId}`;
     const topItems = selectedItems.slice(0, 3);
 
     try {
       window.Kakao.Share.sendDefault({
         objectType: 'list',
-        headerTitle: `✈️ ${selectedCityName} 여행 견적서`,
+        headerTitle: `✈️ ${selectedCityName} ${t('preview.planner')}`,
         headerLink: {
           mobileWebUrl: shareUrl,
           webUrl: shareUrl,
@@ -136,17 +139,17 @@ export function KakaoPreview() {
         })),
         buttons: [
           {
-            title: '상세 견적 보기',
+            title: t('preview.view_all'),
             link: {
               mobileWebUrl: shareUrl,
               webUrl: shareUrl,
             },
           },
           {
-            title: '나도 견적 받기',
+            title: t('hero.button'),
             link: {
-              mobileWebUrl: `${baseUrl}/step-calculator`,
-              webUrl: `${baseUrl}/step-calculator`,
+              mobileWebUrl: `${baseUrl}/${lang}/step-calculator`,
+              webUrl: `${baseUrl}/${lang}/step-calculator`,
             },
           },
         ],
@@ -171,9 +174,9 @@ export function KakaoPreview() {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl p-6 text-center max-w-md">
-          <p className="text-gray-600 mb-4">선택된 항목이 없습니다.</p>
-          <button onClick={() => navigate('/step-calculator')} className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600">
-            견적 계산기로 돌아가기
+          <p className="text-gray-600 mb-4">{t('calc.placeholder')}</p>
+          <button onClick={() => navigate(`/${lang}/step-calculator`)} className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600">
+            {t('preview.recalc')}
           </button>
         </div>
       </div>
@@ -184,12 +187,12 @@ export function KakaoPreview() {
     <div className="min-h-screen bg-gray-100">
       <div className="bg-white sticky top-0 z-10 shadow-sm">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => navigate('/step-calculator')} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+          <button onClick={() => navigate(`/${lang}/step-calculator`)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-base font-semibold">카카오톡 견적서 미리보기</h1>
-            <p className="text-xs text-gray-500">이렇게 전송됩니다</p>
+            <h1 className="text-base font-semibold">{t('preview.title')}</h1>
+            <p className="text-xs text-gray-500">{t('preview.subtitle')}</p>
           </div>
         </div>
       </div>
@@ -203,8 +206,8 @@ export function KakaoPreview() {
               </svg>
             </div>
             <div className="flex-1 text-white">
-              <h2 className="text-sm font-semibold">{selectedCityName} 여행 견적 봇</h2>
-              <p className="text-xs opacity-90">맞춤 여행 플래너</p>
+              <h2 className="text-sm font-semibold">{selectedCityName} {t('preview.bot_name')}</h2>
+              <p className="text-xs opacity-90">{t('preview.planner')}</p>
             </div>
           </div>
 
@@ -220,7 +223,7 @@ export function KakaoPreview() {
                 <div className="px-4 py-3 border-b border-gray-100">
                   <h3 className="text-base font-semibold text-gray-900 mb-1">✈️ Your {selectedCityName} Itinerary</h3>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">총 예상 비용</span>
+                    <span className="text-xs text-gray-500">{t('preview.total')}</span>
                     <span className="text-lg font-bold text-orange-600">₩{totalPrice.toLocaleString()}</span>
                   </div>
                 </div>
@@ -248,7 +251,7 @@ export function KakaoPreview() {
                 <div className="px-4 py-3 border-t border-gray-100">
                   <button onClick={() => selectedItems.forEach(item => handleAffiliateClick(item))} className="w-full py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl text-sm flex items-center justify-center gap-2 shadow-md">
                     <ExternalLink className="w-4 h-4" />
-                    <span>View All Details</span>
+                    <span>{t('preview.view_all')}</span>
                   </button>
                 </div>
               </div>
@@ -256,7 +259,7 @@ export function KakaoPreview() {
 
             <div className="mb-3">
               <div className="bg-white rounded-2xl rounded-tl-sm p-3 inline-block max-w-[85%] shadow-md">
-                <p className="text-sm text-gray-800">위 항목을 클릭하면<br />예약 페이지로 바로 이동해요! ✨</p>
+                <p className="text-sm text-gray-800">{t('preview.click_guide')}</p>
               </div>
             </div>
           </div>
@@ -264,9 +267,9 @@ export function KakaoPreview() {
 
         <div className="bg-white rounded-b-3xl shadow-xl px-5 py-4">
           <div className="flex gap-2">
-            <button onClick={() => navigate('/step-calculator')} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium">다시 계산하기</button>
+            <button onClick={() => navigate(`/${lang}/step-calculator`)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium">{t('preview.recalc')}</button>
             <button onClick={handleKakaoShare} disabled={sharing} className="flex-1 py-2.5 bg-gradient-to-r from-yellow-400 to-yellow-500 text-gray-900 rounded-xl shadow-md text-sm font-medium disabled:opacity-50">
-              {sharing ? '전송 중...' : '카카오톡 공유 📤'}
+              {sharing ? t('preview.loading') : t('preview.share')}
             </button>
           </div>
         </div>

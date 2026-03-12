@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useState, useMemo } from "react";
+import { useNavigate, useParams } from "react-router";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { ArrowLeft, Check, ChevronDown } from "lucide-react";
 import { Switch } from "./ui/switch";
+import { useLanguage } from "../LanguageContext";
 
 interface TravelItem {
   id: string;
@@ -13,19 +14,6 @@ interface TravelItem {
   image: string;
   description: string;
 }
-
-const CITIES = [
-  { id: 'bangkok', name: '방콕', emoji: '🇹🇭' },
-  { id: 'danang', name: '다낭', emoji: '🇻🇳' },
-];
-
-const CATEGORIES = [
-  { id: 'all', name: '전체', icon: '🌟' },
-  { id: 'accommodation', name: '숙소', icon: '🏨' },
-  { id: 'transport', name: '교통', icon: '🚗' },
-  { id: 'tours', name: '투어 & 티켓', icon: '🎫' },
-  { id: 'activities', name: '액티비티', icon: '💆' },
-];
 
 const TRAVEL_ITEMS: TravelItem[] = [
   // Bangkok Items
@@ -151,6 +139,22 @@ const TRAVEL_ITEMS: TravelItem[] = [
 
 export function Calculator() {
   const navigate = useNavigate();
+  const { lang } = useParams<{ lang: string }>();
+  const { t } = useLanguage();
+
+  const CITIES = useMemo(() => [
+    { id: 'bangkok', name: t('city.bangkok'), emoji: '🇹🇭' },
+    { id: 'danang', name: t('city.danang'), emoji: '🇻🇳' },
+  ], [t]);
+
+  const CATEGORIES = useMemo(() => [
+    { id: 'all', name: t('misc.all'), icon: '🌟' },
+    { id: 'accommodation', name: t('step.accommodation'), icon: '🏨' },
+    { id: 'transport', name: t('step.transport'), icon: '🚗' },
+    { id: 'tours', name: t('step.tours'), icon: '🎫' },
+    { id: 'activities', name: t('step.activities'), icon: '💆' },
+  ], [t]);
+
   const [selectedCity, setSelectedCity] = useState('bangkok');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -192,7 +196,7 @@ export function Calculator() {
     localStorage.setItem('totalPrice', totalPrice.toString());
     localStorage.setItem('selectedCity', selectedCity);
     
-    navigate('/kakao-preview');
+    navigate(`/${lang}/kakao-preview`);
   };
 
   const currentCity = CITIES.find(c => c.id === selectedCity);
@@ -203,14 +207,14 @@ export function Calculator() {
       <div className="bg-white sticky top-0 z-20 shadow-sm">
         <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
           <button 
-            onClick={() => navigate('/')}
+            onClick={() => navigate(`/${lang}`)}
             className="p-2 hover:bg-gray-100 rounded-full transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex-1">
-            <h1 className="text-xl">여행 예산 계산기</h1>
-            <p className="text-sm text-gray-500">맞춤 여행 플래너</p>
+            <h1 className="text-xl">{t('calc.title')}</h1>
+            <p className="text-sm text-gray-500">{t('calc.subtitle')}</p>
           </div>
         </div>
 
@@ -224,7 +228,7 @@ export function Calculator() {
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{currentCity?.emoji}</span>
                 <div className="text-left">
-                  <p className="text-xs text-gray-500">여행지 선택</p>
+                  <p className="text-xs text-gray-500">{t('misc.select_city')}</p>
                   <p className="text-base text-gray-900">{currentCity?.name}</p>
                 </div>
               </div>
@@ -283,7 +287,7 @@ export function Calculator() {
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-3">
         {filteredItems.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
-            <p>해당 카테고리에 상품이 없습니다.</p>
+            <p>{t('calc.placeholder')}</p>
           </div>
         ) : (
           filteredItems.map(item => (
@@ -341,14 +345,14 @@ export function Calculator() {
           {/* Total Price */}
           <div className="flex items-center justify-between mb-3">
             <div>
-              <p className="text-xs text-gray-500 mb-0.5">총 예상 비용</p>
+              <p className="text-xs text-gray-500 mb-0.5">{t('calc.total_cost')}</p>
               <p className="text-2xl text-gray-900">
                 ₩{totalPrice.toLocaleString()}
               </p>
             </div>
             <div className="text-sm text-gray-500">
               <Check className="w-4 h-4 inline mr-1" />
-              {selectedItems.size}개 선택
+              {selectedItems.size}{t('calc.items_selected')}
             </div>
           </div>
 
@@ -365,7 +369,7 @@ export function Calculator() {
             <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 3C6.5 3 2 6.58 2 11c0 2.5 1.5 4.7 3.8 6.2-.2.8-.8 2.8-1 3.2-.1.3 0 .5.1.6.1.1.3.2.5.1.5-.1 3.5-2.3 4.1-2.7.5.1 1 .1 1.5.1 5.5 0 10-3.6 10-8s-4.5-8-10-8z"/>
             </svg>
-            <span className="text-gray-900">견적서 카톡으로 받기</span>
+            <span className="text-gray-900">{t('calc.get_kakao')}</span>
           </button>
         </div>
       </div>
