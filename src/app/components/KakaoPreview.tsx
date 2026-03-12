@@ -27,17 +27,51 @@ export function KakaoPreview() {
   const [selectedCityName, setSelectedCityName] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [sharing, setSharing] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const items = localStorage.getItem('selectedItems');
-    const price = localStorage.getItem('totalPrice');
-    const city = localStorage.getItem('selectedCity');
-    const cityName = localStorage.getItem('selectedCityName');
+    const fetchData = async () => {
+      setLoading(true);
+      const params = new URLSearchParams(window.location.search);
+      const shareId = params.get('share');
 
-    if (items) setSelectedItems(JSON.parse(items));
-    if (price) setTotalPrice(parseInt(price));
-    if (city) setSelectedCity(city);
-    if (cityName) setSelectedCityName(cityName);
+      if (shareId) {
+        // 1. URL에 공유 ID가 있는 경우: DB에서 데이터 로드
+        try {
+          const { data, error } = await supabase
+            .from('shares')
+            .select('*')
+            .eq('id', shareId)
+            .single();
+
+          if (error) throw error;
+
+          if (data) {
+            setSelectedItems(data.selected_items);
+            setTotalPrice(data.total_price);
+            setSelectedCityName(data.city_name);
+            setSelectedCity(data.city_id);
+          }
+        } catch (error) {
+          console.error('공유 데이터를 불러오는데 실패했습니다:', error);
+          alert('만료되었거나 잘못된 공유 링크입니다.');
+        }
+      } else {
+        // 2. 일반 접속인 경우: localStorage에서 데이터 로드
+        const items = localStorage.getItem('selectedItems');
+        const price = localStorage.getItem('totalPrice');
+        const city = localStorage.getItem('selectedCity');
+        const cityName = localStorage.getItem('selectedCityName');
+
+        if (items) setSelectedItems(JSON.parse(items));
+        if (price) setTotalPrice(parseInt(price));
+        if (city) setSelectedCity(city);
+        if (cityName) setSelectedCityName(cityName);
+      }
+      setLoading(false);
+    };
+
+    fetchData();
   }, []);
 
   // 카카오 SDK 초기화
@@ -72,72 +106,83 @@ export function KakaoPreview() {
     }
   };
 
-  // 카카오톡 공유
-  const handleKakaoShare = () => {
+  // 카카오톡 공유 — 각 품목 링크를 제휴링크로 연결
+  const handleKakaoShare = async () => {
     if (!window.Kakao?.isInitialized()) {
       alert('카카오 SDK가 로드되지 않았습니다. 잠시 후 다시 시도해주세요.');
       return;
     }
 
     setSharing(true);
-    const baseUrl = window.location.origin;
-    
-    // 선택된 아이템들을 텍스트 리스트로 변환 (최대 5개)
-    const itemsText = selectedItems
-      .slice(0, 5)
-      .map(item => `• ${item.name}`)
-      .join('\n');
-    
-    const moreText = selectedItems.length > 5 ? `\n...외 ${selectedItems.length - 5}개 항목 더보기` : '';
-    const mainItem = selectedItems[0];
-    
-    // 이미지 URL이 없거나 상대 경로인 경우 기본 이미지 사용
-    const imageUrl = (mainItem?.image && mainItem.image.startsWith('http')) 
-      ? mainItem.image 
-      : 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80';
-
     try {
-      console.log('카카오 공유 시도:', {
-        baseUrl,
-        itemsCount: selectedItems.length,
-        cityName: selectedCityName
-      });
+      // 1. Supabase 'shares' 테이블에 현재 견적 정보 저장
+      const { data: shareData, error } = await supabase
+        .from('shares')
+        .insert({
+          selected_items: selectedItems,
+          total_price: totalPrice,
+          city_name: selectedCityName,
+          city_id: selectedCity
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const shareId = shareData.id;
+      const baseUrl = window.location.origin;
+      const shareUrl = `${baseUrl}/kakao-preview?share=${shareId}`;
+
+      const topItems = selectedItems.slice(0, 3);
 
       window.Kakao.Share.sendDefault({
-        objectType: 'feed',
-        content: {
-          title: `✈️ ${selectedCityName} 여행 견적서`,
-          description: `${itemsText}${moreText}\n\n총 예상 비용: ₩${totalPrice.toLocaleString()}`,
-          imageUrl: imageUrl,
-          link: {
-            mobileWebUrl: baseUrl + '/kakao-preview',
-            webUrl: baseUrl + '/kakao-preview',
-          },
+        objectType: 'list',
+        headerTitle: `✈️ ${selectedCityName} 여행 견적서`,
+        headerLink: {
+          mobileWebUrl: shareUrl,
+          webUrl: shareUrl,
         },
+        contents: topItems.map(item => ({
+          title: item.name,
+          description: `${item.description} · ₩${item.price.toLocaleString()} (참고가)`,
+          imageUrl: item.image,
+          link: {
+            mobileWebUrl: shareUrl,
+            webUrl: shareUrl,
+          },
+        })),
         buttons: [
           {
             title: '상세 견적 보기',
             link: {
-              mobileWebUrl: baseUrl + '/kakao-preview',
-              webUrl: baseUrl + '/kakao-preview',
+              mobileWebUrl: shareUrl,
+              webUrl: shareUrl,
             },
           },
           {
             title: '나도 견적 받기',
             link: {
-              mobileWebUrl: baseUrl + '/step-calculator',
-              webUrl: baseUrl + '/step-calculator',
+              mobileWebUrl: `${baseUrl}/step-calculator`,
+              webUrl: `${baseUrl}/step-calculator`,
             },
           },
         ],
       });
     } catch (e) {
-      console.error('카카오 공유 실패:', e);
-      alert('공유 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+      console.error('공유 실패:', e);
+      alert('공유 링크 생성 중 오류가 발생했습니다.');
     } finally {
       setSharing(false);
     }
   };
+
+  if (loading) {
+    return (
+        <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        </div>
+    );
+  }
 
   if (selectedItems.length === 0) {
     return (
