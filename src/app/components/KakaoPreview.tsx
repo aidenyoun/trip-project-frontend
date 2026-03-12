@@ -113,26 +113,27 @@ export function KakaoPreview() {
     setSharing(true);
     const baseUrl = window.location.origin;
     const shareUrl = `${baseUrl}/kakao-preview?share=${shareId}`;
-    
-    // 모바일에서 안정적인 전송을 위해 첫 번째 이미지를 메인으로 사용
-    const mainItem = selectedItems[0];
-    const imageUrl = (mainItem?.image && mainItem.image.startsWith('http')) 
-      ? mainItem.image 
-      : 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80';
+    const topItems = selectedItems.slice(0, 3);
 
     try {
-      // 리스트 대신 모바일에서 더 안정적인 'feed' 템플릿 사용
       window.Kakao.Share.sendDefault({
-        objectType: 'feed',
-        content: {
-          title: `✈️ ${selectedCityName} 여행 견적서`,
-          description: `총 ${selectedItems.length}개 항목 | 예상 비용: ₩${totalPrice.toLocaleString()}`,
-          imageUrl: imageUrl,
+        objectType: 'list',
+        headerTitle: `✈️ ${selectedCityName} 여행 견적서`,
+        headerLink: {
+          mobileWebUrl: shareUrl,
+          webUrl: shareUrl,
+        },
+        contents: topItems.map(item => ({
+          title: item.name,
+          description: `${item.description} · ₩${item.price.toLocaleString()}`,
+          imageUrl: (item.image && item.image.startsWith('http')) 
+            ? item.image 
+            : 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80',
           link: {
             mobileWebUrl: shareUrl,
             webUrl: shareUrl,
           },
-        },
+        })),
         buttons: [
           {
             title: '상세 견적 보기',
