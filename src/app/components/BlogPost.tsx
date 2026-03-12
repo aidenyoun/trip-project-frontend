@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
-import { Calculator, Sparkles, MapPin, Share2, CreditCard, ChevronRight } from "lucide-react";
+import { Calculator, Sparkles, MapPin, Share2, CreditCard, ChevronRight, Check } from "lucide-react";
 
 export function BlogPost() {
   const navigate = useNavigate();
