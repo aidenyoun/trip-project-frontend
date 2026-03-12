@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router";
 import { supabase } from "../../supabase";
+import * as XLSX from 'xlsx';
 import {
     LogOut, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
-    BarChart2, Package, Link, X, Check, Globe
+    BarChart2, Package, Link, X, Check, Globe, FileUp, Download
 } from "lucide-react";
 
 interface TravelItem {
@@ -45,6 +46,7 @@ type Tab = 'items' | 'cities' | 'stats';
 export function AdminDashboard() {
     const navigate = useNavigate();
     const [tab, setTab] = useState<Tab>('items');
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // 품목 상태
     const [items, setItems] = useState<TravelItem[]>([]);
@@ -56,6 +58,7 @@ export function AdminDashboard() {
     const [filterCity, setFilterCity] = useState('all');
     const [filterCategory, setFilterCategory] = useState('all');
     const [sortBy, setSortBy] = useState<'created_at' | 'click_count'>('created_at');
+    const [isBulkUploading, setIsBulkUploading] = useState(false);
 
     // 도시 상태
     const [cities, setCities] = useState<City[]>([]);
@@ -201,6 +204,68 @@ export function AdminDashboard() {
         fetchItems();
     };
 
+    // ── 엑셀 대량 업로드 ──
+    const handleDownloadSample = () => {
+        const sampleData = [
+            {
+                city_id: 'tokyo',
+                category: 'accommodation',
+                name: '도쿄 럭셔리 호텔',
+                description: '신주쿠역 도보 5분',
+                price: 300000,
+                image: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26',
+                affiliate_link: 'https://www.agoda.com',
+                is_active: 'Y'
+            }
+        ];
+        const ws = XLSX.utils.json_to_sheet(sampleData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Items");
+        XLSX.writeFile(wb, "trip_items_sample.xlsx");
+    };
+
+    const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsBulkUploading(true);
+        const reader = new FileReader();
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target?.result;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+                const rows = XLSX.utils.sheet_to_json(ws) as any[];
+
+                const formattedItems = rows.map((row, index) => ({
+                    id: `${row.category || 'item'}-${Date.now()}-${index}`,
+                    city: row.city_id,
+                    category: row.category,
+                    name: row.name,
+                    description: row.description || '',
+                    price: Number(row.price),
+                    image: row.image || '',
+                    affiliate_link: row.affiliate_link || null,
+                    is_active: row.is_active === 'Y' || row.is_active === true
+                }));
+
+                const { error } = await supabase.from('items').insert(formattedItems);
+                if (error) throw error;
+
+                alert(`${formattedItems.length}개의 품목이 업로드되었습니다.`);
+                fetchItems();
+            } catch (err) {
+                console.error('Upload Error:', err);
+                alert('업로드 중 오류가 발생했습니다. 파일 형식을 확인해주세요.');
+            } finally {
+                setIsBulkUploading(false);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+            }
+        };
+        reader.readAsBinaryString(file);
+    };
+
     // 필터
     const filteredItems = items.filter(item => {
         if (filterCity !== 'all' && item.city !== filterCity) return false;
@@ -281,7 +346,29 @@ export function AdminDashboard() {
                                 <option value="created_at">최신순</option>
                                 <option value="click_count">클릭 많은 순</option>
                             </select>
-                            <div className="ml-auto">
+                            <div className="ml-auto flex items-center gap-2">
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    onChange={handleBulkUpload}
+                                    accept=".xlsx, .xls"
+                                    className="hidden"
+                                />
+                                <button
+                                    onClick={handleDownloadSample}
+                                    className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-600 rounded-xl text-xs font-semibold hover:bg-gray-200 transition-colors"
+                                    title="샘플 엑셀 다운로드"
+                                >
+                                    <Download className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={isBulkUploading}
+                                    className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-xl text-xs font-semibold hover:bg-green-700 transition-colors disabled:opacity-50"
+                                >
+                                    <FileUp className="w-3.5 h-3.5" />
+                                    {isBulkUploading ? '업로드 중...' : '엑셀 업로드'}
+                                </button>
                                 <button
                                     onClick={openCreateItemForm}
                                     className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition-colors"
