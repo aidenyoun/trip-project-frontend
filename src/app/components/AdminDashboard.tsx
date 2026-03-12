@@ -4,7 +4,7 @@ import { supabase } from "../../supabase";
 import * as XLSX from 'xlsx';
 import {
     LogOut, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
-    BarChart2, Package, Link, X, Check, Globe, FileUp, Download
+    BarChart2, Package, Link, X, Check, Globe, FileUp, Download, Info, AlertCircle
 } from "lucide-react";
 
 interface TravelItem {
@@ -34,6 +34,18 @@ const CATEGORY_LABELS: Record<string, string> = {
     accommodation: '숙소', transport: '교통', tours: '투어', activities: '액티비티'
 };
 
+// 한글 헤더와 영문 필드 매핑
+const EXCEL_HEADER_MAP: Record<string, string> = {
+    '도시 ID': 'city',
+    '카테고리': 'category',
+    '품목명': 'name',
+    '설명': 'description',
+    '가격': 'price',
+    '이미지 URL': 'image',
+    '제휴 링크': 'affiliate_link',
+    '활성화(Y/N)': 'is_active'
+};
+
 const EMPTY_ITEM_FORM = {
     id: '', city: '', category: 'accommodation',
     name: '', description: '', price: 0, image: '', affiliate_link: '', is_active: true
@@ -59,6 +71,7 @@ export function AdminDashboard() {
     const [filterCategory, setFilterCategory] = useState('all');
     const [sortBy, setSortBy] = useState<'created_at' | 'click_count'>('created_at');
     const [isBulkUploading, setIsBulkUploading] = useState(false);
+    const [showExcelHelp, setShowExcelHelp] = useState(false);
 
     // 도시 상태
     const [cities, setCities] = useState<City[]>([]);
@@ -208,20 +221,37 @@ export function AdminDashboard() {
     const handleDownloadSample = () => {
         const sampleData = [
             {
-                city_id: 'tokyo',
-                category: 'accommodation',
-                name: '도쿄 럭셔리 호텔',
-                description: '신주쿠역 도보 5분',
-                price: 300000,
-                image: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26',
-                affiliate_link: 'https://www.agoda.com',
-                is_active: 'Y'
+                '도시 ID': 'tokyo',
+                '카테고리': 'accommodation',
+                '품목명': '도쿄 럭셔리 호텔',
+                '설명': '신주쿠역 도보 5분, 조식 포함',
+                '가격': 300000,
+                '이미지 URL': 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26',
+                '제휴 링크': 'https://www.agoda.com',
+                '활성화(Y/N)': 'Y'
+            },
+            {
+                '도시 ID': 'jeju',
+                '카테고리': 'transport',
+                '품목명': '전기차 렌트 (24시간)',
+                '설명': '보험 포함, 완전 자차',
+                '가격': 45000,
+                '이미지 URL': '',
+                '제휴 링크': '',
+                '활성화(Y/N)': 'Y'
             }
         ];
         const ws = XLSX.utils.json_to_sheet(sampleData);
+        
+        // 열 너비 조절
+        ws['!cols'] = [
+            { wch: 10 }, { wch: 15 }, { wch: 25 }, { wch: 30 },
+            { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 12 }
+        ];
+
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Items");
-        XLSX.writeFile(wb, "trip_items_sample.xlsx");
+        XLSX.utils.book_append_sheet(wb, ws, "품목업로드양식");
+        XLSX.writeFile(wb, "여행품목_업로드_양식.xlsx");
     };
 
     const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -238,26 +268,43 @@ export function AdminDashboard() {
                 const ws = wb.Sheets[wsname];
                 const rows = XLSX.utils.sheet_to_json(ws) as any[];
 
-                const formattedItems = rows.map((row, index) => ({
-                    id: `${row.category || 'item'}-${Date.now()}-${index}`,
-                    city: row.city_id,
-                    category: row.category,
-                    name: row.name,
-                    description: row.description || '',
-                    price: Number(row.price),
-                    image: row.image || '',
-                    affiliate_link: row.affiliate_link || null,
-                    is_active: row.is_active === 'Y' || row.is_active === true
-                }));
+                if (rows.length === 0) {
+                    alert('업로드할 데이터가 없습니다.');
+                    return;
+                }
+
+                const formattedItems = rows.map((row, index) => {
+                    const item: any = {
+                        id: `${row['카테고리'] || 'item'}-${Date.now()}-${index}`,
+                    };
+                    
+                    // 한글 헤더를 영문 필드로 매핑
+                    Object.entries(EXCEL_HEADER_MAP).forEach(([kr, en]) => {
+                        let value = row[kr];
+                        if (en === 'price') value = Number(value) || 0;
+                        if (en === 'is_active') value = String(value).toUpperCase() === 'Y';
+                        if (en === 'affiliate_link') value = value || null;
+                        item[en] = value;
+                    });
+                    
+                    return item;
+                });
+
+                // 필수값 검증 (도시 ID, 카테고리, 이름)
+                const invalidRow = formattedItems.find(i => !i.city || !i.category || !i.name);
+                if (invalidRow) {
+                    alert('도시 ID, 카테고리, 품목명은 필수 입력 항목입니다.');
+                    return;
+                }
 
                 const { error } = await supabase.from('items').insert(formattedItems);
                 if (error) throw error;
 
-                alert(`${formattedItems.length}개의 품목이 업로드되었습니다.`);
+                alert(`${formattedItems.length}개의 품목이 성공적으로 업로드되었습니다.`);
                 fetchItems();
             } catch (err) {
                 console.error('Upload Error:', err);
-                alert('업로드 중 오류가 발생했습니다. 파일 형식을 확인해주세요.');
+                alert('업로드 중 오류가 발생했습니다. 엑셀 파일의 형식을 다시 확인해주세요.');
             } finally {
                 setIsBulkUploading(false);
                 if (fileInputRef.current) fileInputRef.current.value = '';
@@ -281,15 +328,20 @@ export function AdminDashboard() {
     return (
         <div className="min-h-screen bg-gray-50">
             {/* 헤더 */}
-            <div className="bg-white border-b border-gray-200 sticky top-0 z-20">
+            <div className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
                 <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-                    <div>
-                        <h1 className="text-base font-bold text-gray-900">Trip Project 관리자</h1>
-                        <p className="text-xs text-gray-400">Admin Dashboard</p>
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
+                            <Package className="w-5 h-5" />
+                        </div>
+                        <div>
+                            <h1 className="text-base font-bold text-gray-900 leading-tight">Trip Project 관리자</h1>
+                            <p className="text-[10px] text-gray-400 font-medium tracking-wider uppercase">Admin Dashboard</p>
+                        </div>
                     </div>
                     <button
                         onClick={handleLogout}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                     >
                         <LogOut className="w-3.5 h-3.5" /> 로그아웃
                     </button>
@@ -305,11 +357,11 @@ export function AdminDashboard() {
                         <button
                             key={t.id}
                             onClick={() => setTab(t.id as Tab)}
-                            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                                tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+                            className={`flex items-center gap-1.5 px-4 py-3 text-sm font-semibold border-b-2 transition-all ${
+                                tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'
                             }`}
                         >
-                            <t.icon className="w-4 h-4" />
+                            <t.icon className={`w-4 h-4 ${tab === t.id ? 'text-blue-600' : 'text-gray-400'}`} />
                             {t.label}
                         </button>
                     ))}
@@ -320,32 +372,70 @@ export function AdminDashboard() {
 
                 {/* ── 품목 관리 탭 ── */}
                 {tab === 'items' && (
-                    <div>
-                        <div className="flex flex-wrap items-center gap-2 mb-4">
-                            <select
-                                value={filterCity}
-                                onChange={e => setFilterCity(e.target.value)}
-                                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white"
-                            >
-                                <option value="all">전체 도시</option>
-                                {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                            </select>
-                            <select
-                                value={filterCategory}
-                                onChange={e => setFilterCategory(e.target.value)}
-                                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white"
-                            >
-                                <option value="all">전체 카테고리</option>
-                                {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
-                            </select>
-                            <select
-                                value={sortBy}
-                                onChange={e => setSortBy(e.target.value as any)}
-                                className="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white"
-                            >
-                                <option value="created_at">최신순</option>
-                                <option value="click_count">클릭 많은 순</option>
-                            </select>
+                    <div className="space-y-4">
+                        {/* 엑셀 안내 섹션 */}
+                        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex items-start gap-3">
+                            <Info className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1">
+                                <div className="flex items-center justify-between mb-1">
+                                    <h3 className="text-sm font-bold text-blue-900">대량 업로드 가이드</h3>
+                                    <button 
+                                        onClick={() => setShowExcelHelp(!showExcelHelp)}
+                                        className="text-xs text-blue-600 font-medium hover:underline"
+                                    >
+                                        {showExcelHelp ? '닫기' : '자세히 보기'}
+                                    </button>
+                                </div>
+                                <p className="text-xs text-blue-700 leading-relaxed">
+                                    엑셀 파일을 사용하여 여러 품목을 한 번에 등록할 수 있습니다. 
+                                    반드시 <span className="font-bold underline cursor-pointer" onClick={handleDownloadSample}>양식 파일</span>을 먼저 다운로드하여 작성해 주세요.
+                                </p>
+                                
+                                {showExcelHelp && (
+                                    <div className="mt-3 pt-3 border-t border-blue-200 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-bold text-blue-800">✅ 필수 입력값 안내</p>
+                                            <ul className="text-[11px] text-blue-700 space-y-1 list-disc ml-4">
+                                                <li><strong>도시 ID</strong>: '나라/도시 관리' 탭에 등록된 영문 ID (예: tokyo, bali)</li>
+                                                <li><strong>카테고리</strong>: accommodation, transport, tours, activities 중 하나</li>
+                                                <li><strong>품목명</strong>: 사용자에게 보여질 실제 상품 명칭</li>
+                                            </ul>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <p className="text-xs font-bold text-blue-800">💡 꿀팁</p>
+                                            <ul className="text-[11px] text-blue-700 space-y-1 list-disc ml-4">
+                                                <li><strong>활성화</strong>: 'Y' 입력 시 즉시 노출, 'N' 입력 시 숨김 처리</li>
+                                                <li><strong>가격</strong>: 숫자만 입력하세요 (콤마 제외)</li>
+                                                <li><strong>이미지</strong>: Unsplash 등 외부 이미지 주소(http...)를 넣으세요</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* 필터 및 액션 버튼 */}
+                        <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-2 py-1.5 shadow-sm">
+                                <select
+                                    value={filterCity}
+                                    onChange={e => setFilterCity(e.target.value)}
+                                    className="text-xs font-medium text-gray-600 bg-transparent border-none focus:ring-0 cursor-pointer"
+                                >
+                                    <option value="all">모든 도시</option>
+                                    {cities.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                                </select>
+                                <div className="w-[1px] h-3 bg-gray-200" />
+                                <select
+                                    value={filterCategory}
+                                    onChange={e => setFilterCategory(e.target.value)}
+                                    className="text-xs font-medium text-gray-600 bg-transparent border-none focus:ring-0 cursor-pointer"
+                                >
+                                    <option value="all">모든 카테고리</option>
+                                    {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+                                </select>
+                            </div>
+
                             <div className="ml-auto flex items-center gap-2">
                                 <input
                                     type="file"
@@ -354,76 +444,91 @@ export function AdminDashboard() {
                                     accept=".xlsx, .xls"
                                     className="hidden"
                                 />
-                                <button
-                                    onClick={handleDownloadSample}
-                                    className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-600 rounded-xl text-xs font-semibold hover:bg-gray-200 transition-colors"
-                                    title="샘플 엑셀 다운로드"
-                                >
-                                    <Download className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    disabled={isBulkUploading}
-                                    className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-xl text-xs font-semibold hover:bg-green-700 transition-colors disabled:opacity-50"
-                                >
-                                    <FileUp className="w-3.5 h-3.5" />
-                                    {isBulkUploading ? '업로드 중...' : '엑셀 업로드'}
-                                </button>
+                                
+                                <div className="flex items-center p-1 bg-gray-100 rounded-xl">
+                                    <button
+                                        onClick={handleDownloadSample}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 text-gray-600 rounded-lg text-xs font-bold hover:bg-white hover:shadow-sm transition-all"
+                                    >
+                                        <Download className="w-3.5 h-3.5 text-gray-400" />
+                                        양식 다운로드
+                                    </button>
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={isBulkUploading}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-green-600 rounded-lg text-xs font-bold shadow-sm hover:text-green-700 transition-all disabled:opacity-50"
+                                    >
+                                        <FileUp className="w-3.5 h-3.5" />
+                                        {isBulkUploading ? '업로드 중...' : '엑셀 업로드'}
+                                    </button>
+                                </div>
+
                                 <button
                                     onClick={openCreateItemForm}
-                                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition-colors"
+                                    className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-100 transition-all active:scale-95"
                                 >
-                                    <Plus className="w-3.5 h-3.5" /> 품목 추가
+                                    <Plus className="w-4 h-4" /> 품목 추가
                                 </button>
                             </div>
                         </div>
 
                         {itemsLoading ? (
                             <div className="space-y-2">
-                                {[1,2,3].map(i => <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}
+                                {[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}
                             </div>
                         ) : (
                             <div className="space-y-2">
                                 {filteredItems.map(item => (
-                                    <div key={item.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${!item.is_active ? 'opacity-50' : ''}`}>
-                                        <div className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                                            {item.image && <img src={item.image} alt={item.name} className="w-full h-full object-cover" />}
+                                    <div key={item.id} className={`bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4 hover:border-blue-200 hover:shadow-md transition-all group ${!item.is_active ? 'opacity-50 grayscale' : ''}`}>
+                                        <div className="w-14 h-14 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0 border border-gray-100">
+                                            {item.image ? (
+                                                <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-gray-300">
+                                                    <Package className="w-6 h-6" />
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-medium">
-                          {cityLabels[item.city] || item.city}
-                        </span>
-                                                <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-                          {CATEGORY_LABELS[item.category]}
-                        </span>
+                                            <div className="flex items-center gap-1.5 mb-1">
+                                                <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold">
+                                                  {cityLabels[item.city] || item.city}
+                                                </span>
+                                                <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold">
+                                                  {CATEGORY_LABELS[item.category]}
+                                                </span>
                                             </div>
-                                            <p className="text-sm font-medium text-gray-900 line-clamp-1">{item.name}</p>
-                                            <div className="flex items-center gap-3 mt-0.5">
-                                                <span className="text-xs text-blue-600 font-semibold">₩{item.price.toLocaleString()}</span>
-                                                <span className="text-xs text-gray-400">클릭 {item.click_count}회</span>
-                                                {item.affiliate_link && (
-                                                    <span className="text-[10px] text-green-600 flex items-center gap-0.5">
-                            <Link className="w-3 h-3" /> 링크 있음
-                          </span>
-                                                )}
+                                            <p className="text-sm font-bold text-gray-900 line-clamp-1">{item.name}</p>
+                                            <div className="flex items-center gap-3 mt-1">
+                                                <span className="text-sm text-blue-600 font-extrabold italic">₩{item.price.toLocaleString()}</span>
+                                                <div className="flex items-center gap-1 text-[11px] text-gray-400 font-medium">
+                                                    <BarChart2 className="w-3 h-3" />
+                                                    클릭 {item.click_count}회
+                                                </div>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-1 flex-shrink-0">
-                                            <button onClick={() => handleToggleItem(item)} className="p-1.5 hover:bg-gray-100 rounded-lg">
-                                                {item.is_active ? <ToggleRight className="w-5 h-5 text-blue-500" /> : <ToggleLeft className="w-5 h-5 text-gray-400" />}
+                                        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button 
+                                                onClick={() => handleToggleItem(item)} 
+                                                title={item.is_active ? '숨기기' : '표시하기'}
+                                                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
+                                            >
+                                                {item.is_active ? <ToggleRight className="w-6 h-6 text-blue-500" /> : <ToggleLeft className="w-6 h-6 text-gray-300" />}
                                             </button>
-                                            <button onClick={() => openEditItemForm(item)} className="p-1.5 hover:bg-gray-100 rounded-lg">
-                                                <Pencil className="w-4 h-4 text-gray-500" />
+                                            <button onClick={() => openEditItemForm(item)} className="p-2 hover:bg-blue-50 rounded-xl transition-colors">
+                                                <Pencil className="w-4 h-4 text-blue-600" />
                                             </button>
-                                            <button onClick={() => handleDeleteItem(item.id)} className="p-1.5 hover:bg-red-50 rounded-lg">
-                                                <Trash2 className="w-4 h-4 text-red-400" />
+                                            <button onClick={() => handleDeleteItem(item.id)} className="p-2 hover:bg-red-50 rounded-xl transition-colors">
+                                                <Trash2 className="w-4 h-4 text-red-500" />
                                             </button>
                                         </div>
                                     </div>
                                 ))}
                                 {filteredItems.length === 0 && (
-                                    <div className="text-center py-12 text-gray-400 text-sm">해당 조건의 품목이 없습니다.</div>
+                                    <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
+                                        <AlertCircle className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                                        <p className="text-sm text-gray-400 font-medium">해당 조건에 맞는 품목이 없습니다.</p>
+                                    </div>
                                 )}
                             </div>
                         )}
@@ -433,46 +538,62 @@ export function AdminDashboard() {
                 {/* ── 나라/도시 관리 탭 ── */}
                 {tab === 'cities' && (
                     <div>
-                        <div className="flex justify-end mb-4">
+                        <div className="flex justify-between items-center mb-4">
+                            <div className="bg-white border border-gray-200 rounded-xl px-4 py-2 text-xs text-gray-500 font-medium">
+                                총 <span className="text-blue-600 font-bold">{cities.length}개</span>의 도시가 등록되어 있습니다.
+                            </div>
                             <button
                                 onClick={openCreateCityForm}
-                                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition-colors"
+                                className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-100 transition-all active:scale-95"
                             >
-                                <Plus className="w-3.5 h-3.5" /> 나라/도시 추가
+                                <Plus className="w-4 h-4" /> 나라/도시 추가
                             </button>
                         </div>
 
                         {citiesLoading ? (
                             <div className="space-y-2">
-                                {[1,2,3].map(i => <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}
+                                {[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}
                             </div>
                         ) : (
-                            <div className="space-y-2">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 {cities.map(city => (
-                                    <div key={city.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${!city.is_active ? 'opacity-50' : ''}`}>
-                                        <div className="w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center text-2xl flex-shrink-0">
+                                    <div key={city.id} className={`bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4 group transition-all hover:border-blue-200 hover:shadow-md ${!city.is_active ? 'opacity-50 grayscale' : ''}`}>
+                                        <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center text-3xl flex-shrink-0 shadow-inner">
                                             {city.emoji}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-semibold text-gray-900">{city.name}</p>
-                                            <p className="text-xs text-gray-400">ID: {city.id} · 품목 {items.filter(i => i.city === city.id).length}개</p>
+                                            <div className="flex items-center gap-2">
+                                                <p className="text-sm font-bold text-gray-900">{city.name}</p>
+                                                {city.is_active ? (
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                                ) : (
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+                                                )}
+                                            </div>
+                                            <p className="text-[11px] text-gray-400 mt-0.5 font-medium">
+                                                <span className="bg-gray-100 px-1.5 py-0.5 rounded mr-1">ID: {city.id}</span>
+                                                품목 {items.filter(i => i.city === city.id).length}개
+                                            </p>
                                         </div>
-                                        <div className="flex items-center gap-1 flex-shrink-0">
-                                            <button onClick={() => handleToggleCity(city)} className="p-1.5 hover:bg-gray-100 rounded-lg">
-                                                {city.is_active ? <ToggleRight className="w-5 h-5 text-blue-500" /> : <ToggleLeft className="w-5 h-5 text-gray-400" />}
+                                        <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => handleToggleCity(city)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                                                {city.is_active ? <ToggleRight className="w-6 h-6 text-blue-500" /> : <ToggleLeft className="w-6 h-6 text-gray-300" />}
                                             </button>
-                                            <button onClick={() => openEditCityForm(city)} className="p-1.5 hover:bg-gray-100 rounded-lg">
-                                                <Pencil className="w-4 h-4 text-gray-500" />
+                                            <button onClick={() => openEditCityForm(city)} className="p-2 hover:bg-blue-50 rounded-xl transition-colors">
+                                                <Pencil className="w-4 h-4 text-blue-600" />
                                             </button>
-                                            <button onClick={() => handleDeleteCity(city.id)} className="p-1.5 hover:bg-red-50 rounded-lg">
-                                                <Trash2 className="w-4 h-4 text-red-400" />
+                                            <button onClick={() => handleDeleteCity(city.id)} className="p-2 hover:bg-red-50 rounded-xl transition-colors">
+                                                <Trash2 className="w-4 h-4 text-red-500" />
                                             </button>
                                         </div>
                                     </div>
                                 ))}
-                                {cities.length === 0 && (
-                                    <div className="text-center py-12 text-gray-400 text-sm">등록된 도시가 없습니다.</div>
-                                )}
+                            </div>
+                        )}
+                        {cities.length === 0 && !citiesLoading && (
+                            <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
+                                <AlertCircle className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                                <p className="text-sm text-gray-400 font-medium">등록된 도시가 없습니다.</p>
                             </div>
                         )}
                     </div>
@@ -480,59 +601,77 @@ export function AdminDashboard() {
 
                 {/* ── 통계 탭 ── */}
                 {tab === 'stats' && (
-                    <div>
-                        <div className="grid grid-cols-3 gap-3 mb-6">
+                    <div className="space-y-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             {[
-                                { label: '전체 품목', value: items.length },
-                                { label: '활성 품목', value: items.filter(i => i.is_active).length },
-                                { label: '총 클릭수', value: totalClicks },
+                                { label: '전체 품목', value: items.length, color: 'text-gray-900', bg: 'bg-white' },
+                                { label: '활성 품목', value: items.filter(i => i.is_active).length, color: 'text-green-600', bg: 'bg-green-50' },
+                                { label: '총 클릭수', value: totalClicks, color: 'text-blue-600', bg: 'bg-blue-50' },
                             ].map(card => (
-                                <div key={card.label} className="bg-white rounded-xl border p-4 text-center">
-                                    <p className="text-2xl font-bold text-gray-900">{card.value}</p>
-                                    <p className="text-xs text-gray-500 mt-1">{card.label}</p>
+                                <div key={card.label} className={`${card.bg} rounded-2xl border border-gray-100 p-5 shadow-sm`}>
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-tight mb-1">{card.label}</p>
+                                    <p className={`text-3xl font-black ${card.color}`}>{card.value.toLocaleString()}</p>
                                 </div>
                             ))}
                         </div>
 
-                        <div className="bg-white rounded-xl border p-4 mb-3">
-                            <h2 className="text-sm font-bold text-gray-900 mb-4">🏆 클릭 TOP 5</h2>
-                            <div className="space-y-3">
-                                {topItems.map((item, index) => (
-                                    <div key={item.id} className="flex items-center gap-3">
-                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                        index === 0 ? 'bg-yellow-100 text-yellow-700' :
-                            index === 1 ? 'bg-gray-100 text-gray-600' :
-                                index === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-50 text-gray-400'
-                    }`}>{index + 1}</span>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium text-gray-900 line-clamp-1">{item.name}</p>
-                                            <p className="text-xs text-gray-400">{cityLabels[item.city] || item.city} · {CATEGORY_LABELS[item.category]}</p>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-sm">
+                                <div className="flex items-center justify-between mb-6">
+                                    <h2 className="text-base font-black text-gray-900 flex items-center gap-2">
+                                        <BarChart2 className="w-5 h-5 text-blue-500" />
+                                        클릭 TOP 5 품목
+                                    </h2>
+                                    <span className="text-[10px] text-gray-400 font-bold uppercase">Rankings</span>
+                                </div>
+                                <div className="space-y-4">
+                                    {topItems.map((item, index) => (
+                                        <div key={item.id} className="flex items-center gap-4 p-3 rounded-2xl hover:bg-gray-50 transition-colors">
+                                            <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-black flex-shrink-0 ${
+                                                index === 0 ? 'bg-yellow-400 text-white' :
+                                                    index === 1 ? 'bg-gray-200 text-gray-600' :
+                                                        index === 2 ? 'bg-orange-400 text-white' : 'bg-gray-100 text-gray-400'
+                                            }`}>{index + 1}</span>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-bold text-gray-900 line-clamp-1">{item.name}</p>
+                                                <p className="text-[11px] text-gray-400 font-medium">{cityLabels[item.city] || item.city} · {CATEGORY_LABELS[item.category]}</p>
+                                            </div>
+                                            <p className="text-base font-black text-blue-600 flex-shrink-0">{item.click_count.toLocaleString()}</p>
                                         </div>
-                                        <p className="text-sm font-bold text-blue-600 flex-shrink-0">{item.click_count}회</p>
-                                    </div>
-                                ))}
-                                {topItems.length === 0 && <p className="text-sm text-gray-400 text-center py-4">아직 클릭 데이터가 없습니다.</p>}
+                                    ))}
+                                    {topItems.length === 0 && <p className="text-sm text-gray-400 text-center py-10">데이터가 없습니다.</p>}
+                                </div>
                             </div>
-                        </div>
 
-                        <div className="bg-white rounded-xl border p-4">
-                            <h2 className="text-sm font-bold text-gray-900 mb-4">🌏 도시별 클릭수</h2>
-                            <div className="space-y-3">
-                                {cities.map(city => {
-                                    const cityClicks = items.filter(i => i.city === city.id).reduce((sum, i) => sum + i.click_count, 0);
-                                    const pct = totalClicks > 0 ? Math.round((cityClicks / totalClicks) * 100) : 0;
-                                    return (
-                                        <div key={city.id}>
-                                            <div className="flex items-center justify-between mb-1">
-                                                <span className="text-xs font-medium text-gray-700">{city.emoji} {city.name}</span>
-                                                <span className="text-xs text-gray-500">{cityClicks}회 ({pct}%)</span>
+                            <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-sm">
+                                <div className="flex items-center justify-between mb-6">
+                                    <h2 className="text-base font-black text-gray-900 flex items-center gap-2">
+                                        <Globe className="w-5 h-5 text-green-500" />
+                                        도시별 클릭 비중
+                                    </h2>
+                                    <span className="text-[10px] text-gray-400 font-bold uppercase">Distributions</span>
+                                </div>
+                                <div className="space-y-5">
+                                    {cities.map(city => {
+                                        const cityClicks = items.filter(i => i.city === city.id).reduce((sum, i) => sum + i.click_count, 0);
+                                        const pct = totalClicks > 0 ? Math.round((cityClicks / totalClicks) * 100) : 0;
+                                        return (
+                                            <div key={city.id}>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-xs font-bold text-gray-700">{city.emoji} {city.name}</span>
+                                                    <span className="text-[11px] text-gray-500 font-bold">{cityClicks.toLocaleString()}회 ({pct}%)</span>
+                                                </div>
+                                                <div className="h-3 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
+                                                    <div 
+                                                        className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all duration-1000" 
+                                                        style={{ width: `${pct}%` }} 
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                                <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
-                                            </div>
-                                        </div>
-                                    );
-                                })}
+                                        );
+                                    })}
+                                    {cities.length === 0 && <p className="text-sm text-gray-400 text-center py-10">데이터가 없습니다.</p>}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -541,59 +680,65 @@ export function AdminDashboard() {
 
             {/* 도시 추가/수정 모달 */}
             {showCityForm && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-sm">
-                        <div className="flex items-center justify-between px-5 py-4 border-b">
-                            <h2 className="text-base font-bold">{editingCity ? '도시 수정' : '나라/도시 추가'}</h2>
-                            <button onClick={() => setShowCityForm(false)}><X className="w-5 h-5 text-gray-400" /></button>
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between px-6 py-4 border-b">
+                            <h2 className="text-lg font-black text-gray-900">{editingCity ? '도시 정보 수정' : '새로운 도시 추가'}</h2>
+                            <button onClick={() => setShowCityForm(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                                <X className="w-5 h-5 text-gray-400" />
+                            </button>
                         </div>
-                        <div className="px-5 py-4 space-y-4">
+                        <div className="px-6 py-6 space-y-5">
                             {!editingCity && (
                                 <div>
-                                    <label className="text-xs font-semibold text-gray-600 mb-1 block">ID (영문, 변경 불가) *</label>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">도시 ID (영문 소문자)</label>
                                     <input
                                         value={cityForm.id}
                                         onChange={e => setCityForm({...cityForm, id: e.target.value})}
-                                        placeholder="jeju, singapore, bali..."
-                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="예: tokyo, jeju-do"
+                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all"
                                     />
                                 </div>
                             )}
                             <div>
-                                <label className="text-xs font-semibold text-gray-600 mb-1 block">도시명 *</label>
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">도시명 (한글)</label>
                                 <input
                                     value={cityForm.name}
                                     onChange={e => setCityForm({...cityForm, name: e.target.value})}
-                                    placeholder="제주, 싱가포르, 발리..."
-                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="예: 도쿄, 제주도"
+                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all"
                                 />
                             </div>
                             <div>
-                                <label className="text-xs font-semibold text-gray-600 mb-1 block">이모지 국기</label>
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">이모지 국기</label>
                                 <input
                                     value={cityForm.emoji}
                                     onChange={e => setCityForm({...cityForm, emoji: e.target.value})}
-                                    placeholder="🇰🇷"
-                                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="예: 🇰🇷, 🇯🇵"
+                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xl font-bold focus:ring-2 focus:ring-blue-500 transition-all"
                                 />
                             </div>
-                            <div className="flex items-center justify-between py-1">
+                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
                                 <div>
-                                    <p className="text-sm font-medium text-gray-900">활성화</p>
-                                    <p className="text-xs text-gray-400">비활성화 시 사용자에게 노출되지 않습니다</p>
+                                    <p className="text-sm font-bold text-gray-900">검색 활성화</p>
+                                    <p className="text-[10px] text-gray-400 font-medium">체크 시 사용자 화면에 노출됩니다</p>
                                 </div>
                                 <button
                                     onClick={() => setCityForm({...cityForm, is_active: !cityForm.is_active})}
-                                    className={`w-11 h-6 rounded-full transition-colors relative ${cityForm.is_active ? 'bg-blue-600' : 'bg-gray-200'}`}
+                                    className={`w-12 h-6.5 rounded-full transition-all relative ${cityForm.is_active ? 'bg-blue-600' : 'bg-gray-300'}`}
                                 >
-                                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${cityForm.is_active ? 'left-5' : 'left-0.5'}`} />
+                                    <span className={`absolute top-0.75 w-5 h-5 bg-white rounded-full shadow-md transition-all ${cityForm.is_active ? 'left-6.25' : 'left-0.75'}`} />
                                 </button>
                             </div>
                         </div>
-                        <div className="px-5 py-4 border-t flex gap-2">
-                            <button onClick={() => setShowCityForm(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium">취소</button>
-                            <button onClick={handleSaveCity} disabled={savingCity} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-                                {savingCity ? '저장 중...' : editingCity ? '수정 완료' : '추가하기'}
+                        <div className="px-6 py-5 border-t flex gap-3">
+                            <button onClick={() => setShowCityForm(false)} className="flex-1 py-3 text-gray-500 text-sm font-bold hover:bg-gray-50 rounded-2xl transition-all">취소</button>
+                            <button 
+                                onClick={handleSaveCity} 
+                                disabled={savingCity} 
+                                className="flex-1 py-3 bg-blue-600 text-white rounded-2xl text-sm font-black shadow-lg shadow-blue-100 hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-95"
+                            >
+                                {savingCity ? '저장 중...' : editingCity ? '수정 완료' : '도시 추가'}
                             </button>
                         </div>
                     </div>
@@ -602,84 +747,116 @@ export function AdminDashboard() {
 
             {/* 품목 추가/수정 모달 */}
             {showItemForm && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                        <div className="flex items-center justify-between px-5 py-4 border-b">
-                            <h2 className="text-base font-bold">{editingItem ? '품목 수정' : '품목 추가'}</h2>
-                            <button onClick={() => setShowItemForm(false)}><X className="w-5 h-5 text-gray-400" /></button>
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
+                            <h2 className="text-lg font-black text-gray-900">{editingItem ? '품목 수정' : '새 품목 등록'}</h2>
+                            <button onClick={() => setShowItemForm(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                                <X className="w-5 h-5 text-gray-400" />
+                            </button>
                         </div>
-                        <div className="px-5 py-4 space-y-4">
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="text-xs font-semibold text-gray-600 mb-1 block">도시</label>
+                        <div className="px-6 py-6 space-y-6">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">도시 선택</label>
                                     <select
                                         value={itemForm.city}
                                         onChange={e => setItemForm({...itemForm, city: e.target.value})}
-                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all"
                                     >
-                                        {cities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                        {cities.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
                                     </select>
                                 </div>
-                                <div>
-                                    <label className="text-xs font-semibold text-gray-600 mb-1 block">카테고리</label>
+                                <div className="space-y-1.5">
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">카테고리</label>
                                     <select
                                         value={itemForm.category}
                                         onChange={e => setItemForm({...itemForm, category: e.target.value})}
-                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all"
                                     >
                                         {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
                                     </select>
                                 </div>
                             </div>
-                            <div>
-                                <label className="text-xs font-semibold text-gray-600 mb-1 block">품목명 *</label>
-                                <input value={itemForm.name} onChange={e => setItemForm({...itemForm, name: e.target.value})}
-                                       placeholder="5성급 럭셔리 호텔 (3박)"
-                                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            
+                            <div className="space-y-1.5">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">품목명 *</label>
+                                <input 
+                                    value={itemForm.name} 
+                                    onChange={e => setItemForm({...itemForm, name: e.target.value})}
+                                    placeholder="사용자에게 보여질 상품명을 입력하세요"
+                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all" 
+                                />
                             </div>
-                            <div>
-                                <label className="text-xs font-semibold text-gray-600 mb-1 block">설명</label>
-                                <input value={itemForm.description} onChange={e => setItemForm({...itemForm, description: e.target.value})}
-                                       placeholder="인피니티 풀 & 조식 포함, 시암 지역"
-                                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            
+                            <div className="space-y-1.5">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">상세 설명</label>
+                                <textarea 
+                                    value={itemForm.description} 
+                                    onChange={e => setItemForm({...itemForm, description: e.target.value})}
+                                    placeholder="상품에 대한 간략한 특징을 적어주세요"
+                                    rows={2}
+                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all resize-none" 
+                                />
                             </div>
-                            <div>
-                                <label className="text-xs font-semibold text-gray-600 mb-1 block">가격 (₩) *</label>
-                                <input type="number" value={itemForm.price} onChange={e => setItemForm({...itemForm, price: Number(e.target.value)})}
-                                       placeholder="450000"
-                                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                            </div>
-                            <div>
-                                <label className="text-xs font-semibold text-gray-600 mb-1 block">이미지 URL</label>
-                                <input value={itemForm.image} onChange={e => setItemForm({...itemForm, image: e.target.value})}
-                                       placeholder="https://images.unsplash.com/..."
-                                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                            </div>
-                            <div>
-                                <label className="text-xs font-semibold text-gray-600 mb-1 block flex items-center gap-1">
-                                    <Link className="w-3 h-3" /> 제휴 링크
-                                </label>
-                                <input value={itemForm.affiliate_link} onChange={e => setItemForm({...itemForm, affiliate_link: e.target.value})}
-                                       placeholder="https://agoda.com/..."
-                                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                            </div>
-                            <div className="flex items-center justify-between py-1">
-                                <div>
-                                    <p className="text-sm font-medium text-gray-900">활성화</p>
-                                    <p className="text-xs text-gray-400">비활성화 시 사용자에게 노출되지 않습니다</p>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">가격 (₩) *</label>
+                                    <input 
+                                        type="number" 
+                                        value={itemForm.price} 
+                                        onChange={e => setItemForm({...itemForm, price: Number(e.target.value)})}
+                                        placeholder="0"
+                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-black focus:ring-2 focus:ring-blue-500 transition-all" 
+                                    />
                                 </div>
-                                <button
-                                    onClick={() => setItemForm({...itemForm, is_active: !itemForm.is_active})}
-                                    className={`w-11 h-6 rounded-full transition-colors relative ${itemForm.is_active ? 'bg-blue-600' : 'bg-gray-200'}`}
-                                >
-                                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${itemForm.is_active ? 'left-5' : 'left-0.5'}`} />
-                                </button>
+                                <div className="space-y-1.5">
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">사용 여부</label>
+                                    <button
+                                        onClick={() => setItemForm({...itemForm, is_active: !itemForm.is_active})}
+                                        className={`w-full h-[46px] rounded-2xl transition-all flex items-center justify-center gap-2 font-bold text-sm ${itemForm.is_active ? 'bg-blue-50 text-blue-600 border-2 border-blue-100' : 'bg-gray-50 text-gray-400 border-2 border-transparent'}`}
+                                    >
+                                        {itemForm.is_active ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                                        {itemForm.is_active ? '활성화됨' : '비활성 상태'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4 pt-2 border-t border-gray-100">
+                                <div className="space-y-1.5">
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1 flex items-center gap-1.5">
+                                        이미지 URL
+                                    </label>
+                                    <input 
+                                        value={itemForm.image} 
+                                        onChange={e => setItemForm({...itemForm, image: e.target.value})}
+                                        placeholder="https://images.unsplash.com/..."
+                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 transition-all" 
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1 flex items-center gap-1.5">
+                                        <Link className="w-3.5 h-3.5 text-blue-500" /> 
+                                        제휴 수익 링크 (선택)
+                                    </label>
+                                    <input 
+                                        value={itemForm.affiliate_link} 
+                                        onChange={e => setItemForm({...itemForm, affiliate_link: e.target.value})}
+                                        placeholder="클릭 시 이동할 예약 페이지 주소"
+                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 transition-all" 
+                                    />
+                                </div>
                             </div>
                         </div>
-                        <div className="px-5 py-4 border-t flex gap-2">
-                            <button onClick={() => setShowItemForm(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium">취소</button>
-                            <button onClick={handleSaveItem} disabled={savingItem} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-                                {savingItem ? '저장 중...' : editingItem ? '수정 완료' : '추가하기'}
+                        <div className="px-6 py-5 border-t bg-gray-50 flex gap-3 sticky bottom-0 z-10">
+                            <button onClick={() => setShowItemForm(false)} className="flex-1 py-3 text-gray-500 text-sm font-bold hover:bg-white hover:shadow-sm rounded-2xl transition-all">취소</button>
+                            <button 
+                                onClick={handleSaveItem} 
+                                disabled={savingItem} 
+                                className="flex-1 py-3 bg-blue-600 text-white rounded-2xl text-sm font-black shadow-lg shadow-blue-100 hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-95"
+                            >
+                                {savingItem ? '데이터 저장 중...' : editingItem ? '수정 사항 반영' : '품목 등록 완료'}
                             </button>
                         </div>
                     </div>
