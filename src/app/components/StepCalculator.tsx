@@ -171,7 +171,16 @@ export function StepCalculator() {
                           onClick={() => handleCitySelect(city)}
                           className="w-full flex items-center gap-4 p-4 bg-white border border-gray-200 rounded-2xl hover:border-blue-400 hover:shadow-md transition-all text-left group"
                       >
-                        <span className="text-3xl">{city.emoji}</span>
+                        <img
+                            src={`https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/${
+                                [...city.emoji].map(c => c.codePointAt(0)?.toString(16)).join('-')
+                            }.svg`}
+                            alt={city.name}
+                            className="w-9 h-9"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                        />
                         <div className="flex-1">
                           <p className="text-base font-semibold text-gray-900">{t(`city.${city.id}`)}</p>
                           <p className="text-xs text-gray-400 mt-0.5">
