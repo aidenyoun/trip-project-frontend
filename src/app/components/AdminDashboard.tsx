@@ -54,19 +54,13 @@ const BUCKET = 'item-images';
 async function uploadImageToStorage(imageUrl: string, itemId: string): Promise<string> {
     if (!imageUrl || !imageUrl.startsWith('http')) return imageUrl;
     try {
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(imageUrl)}`;
-        const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        const mimeType = blob.type || 'image/jpeg';
-        const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
-        const fileName = `items/${itemId}.${ext}`;
-        const { error } = await supabase.storage.from(BUCKET).upload(fileName, blob, { upsert: true, contentType: mimeType });
+        const { data, error } = await supabase.functions.invoke('upload-image', {
+            body: { imageUrl, itemId }
+        });
         if (error) throw error;
-        const { data } = supabase.storage.from(BUCKET).getPublicUrl(fileName);
-        return data.publicUrl;
+        return data.url || imageUrl;
     } catch (e) {
-        console.warn('이미지 업로드 실패, 원본 유지:', imageUrl, e);
+        console.warn('이미지 업로드 실패, 원본 유지:', e);
         return imageUrl;
     }
 }
