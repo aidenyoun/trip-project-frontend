@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { ArrowLeft, Check, MapPin } from "lucide-react";
 import { supabase } from "../../supabase";
+import { fetchItemsWithTranslation, fetchCitiesWithTranslation } from "../../hooks/useTranslatedItems";
 import { useLanguage } from "../LanguageContext";
 
 interface TravelItem {
@@ -26,6 +27,7 @@ interface City {
 type Phase = 'selectCity' | 'selectItems';
 
 export function StepCalculator() {
+  const { language } = useLanguage();
   const navigate = useNavigate();
   const { lang } = useParams<{ lang: string }>();
   const { t } = useLanguage();
@@ -45,29 +47,28 @@ export function StepCalculator() {
   const [allItems, setAllItems] = useState<TravelItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 도시 로드
+  // 도시 목록 fetch 수정
   useEffect(() => {
-    const fetchCities = async () => {
-      const { data } = await supabase
-          .from('cities')
-          .select('*')
-          .eq('is_active', true)
-          .order('created_at', { ascending: true });
-      setCities(data || []);
+    const loadCities = async () => {
+      const cities = await fetchCitiesWithTranslation(language);
+      setCities(cities);
     };
-    fetchCities();
-  }, []);
+    loadCities();
+  }, [language]); // language 변경 시 재fetch
 
-  // 품목 로드
   useEffect(() => {
-    const fetchItems = async () => {
+    if (!selectedCity) return;
+    const loadItems = async () => {
       setLoading(true);
-      const { data } = await supabase.from('items').select('*').eq('is_active', true);
-      setAllItems(data || []);
-      setLoading(false);
+      try {
+        const items = await fetchItemsWithTranslation(selectedCity.id, language); // ✅ .id 추가
+        setAllItems(items); // ✅ setAllItems로 변경
+      } finally {
+        setLoading(false);
+      }
     };
-    fetchItems();
-  }, []);
+    loadItems();
+  }, [selectedCity, language]);
 
   const currentCategory = STEPS[currentStep].id;
   const currentStepInfo = STEPS[currentStep];

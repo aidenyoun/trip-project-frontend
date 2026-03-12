@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { supabase } from "../../supabase";
+import { fetchItemsWithTranslation } from "../../hooks/useTranslatedItems";
 import { useLanguage } from "../LanguageContext";
 
 declare global {
@@ -22,6 +23,7 @@ interface TravelItem {
 }
 
 export function KakaoPreview() {
+  const { language } = useLanguage();
   const navigate = useNavigate();
   const { lang } = useParams<{ lang: string }>();
   const { t } = useLanguage();
@@ -37,28 +39,62 @@ export function KakaoPreview() {
     const fetchData = async () => {
       setLoading(true);
       const params = new URLSearchParams(window.location.search);
-      const sId = params.get('share');
+      const sId = params.get("share");
 
       if (sId) {
+        // 공유 링크로 접근 시: 원본 item_id로 현재 언어 번역본 재조회
         try {
-          const { data, error } = await supabase.from('shares').select('*').eq('id', sId).single();
-          if (error) throw error;
+          const { data } = await supabase
+              .from("shares")
+              .select("*")
+              .eq("id", sId)
+              .single();
+
           if (data) {
-            setSelectedItems(data.selected_items);
             setTotalPrice(data.total_price);
             setSelectedCityName(data.city_name);
             setSelectedCity(data.city_id);
             setShareId(sId);
+
+            // item id 목록으로 번역본 재조회
+            const itemIds = data.selected_items.map((i: TravelItem) => i.id);
+
+            if (language !== "ko") {
+              const { data: translatedItems } = await supabase
+                  .from("items")
+                  .select(`*, item_translations(name, description, lang)`)
+                  .in("id", itemIds);
+
+              const merged = (translatedItems || []).map((item) => {
+                const t = item.item_translations?.find(
+                    (tr: { lang: string }) => tr.lang === language
+                );
+                return {
+                  ...item,
+                  name: t?.name ?? item.name,
+                  description: t?.description ?? item.description,
+                };
+              });
+              // 원래 선택 순서 유지
+              const ordered = itemIds.map((id: string) =>
+                  merged.find((i) => i.id === id)
+              ).filter(Boolean);
+              setSelectedItems(ordered);
+            } else {
+              setSelectedItems(data.selected_items);
+            }
           }
         } catch (error) {
-          console.error('불러오기 실패:', error);
-          alert('만료되었거나 잘못된 공유 링크입니다.');
+          console.error("불러오기 실패:", error);
+          alert("만료되었거나 잘못된 공유 링크입니다.");
         }
       } else {
-        const items = localStorage.getItem('selectedItems');
-        const price = localStorage.getItem('totalPrice');
-        const city = localStorage.getItem('selectedCity');
-        const cityName = localStorage.getItem('selectedCityName');
+        // localStorage 접근 시 (StepCalculator에서 넘어온 경우)
+        // 이미 번역된 상태로 넘어오므로 그대로 사용
+        const items = localStorage.getItem("selectedItems");
+        const price = localStorage.getItem("totalPrice");
+        const city = localStorage.getItem("selectedCity");
+        const cityName = localStorage.getItem("selectedCityName");
 
         if (items && price && city && cityName) {
           const parsedItems = JSON.parse(items);
@@ -68,22 +104,26 @@ export function KakaoPreview() {
           setSelectedCityName(cityName);
 
           try {
-            const { data } = await supabase.from('shares').insert({
-              selected_items: parsedItems,
-              total_price: parseInt(price),
-              city_name: cityName,
-              city_id: city
-            }).select().single();
+            const { data } = await supabase
+                .from("shares")
+                .insert({
+                  selected_items: parsedItems,
+                  total_price: parseInt(price),
+                  city_name: cityName,
+                  city_id: city,
+                })
+                .select()
+                .single();
             if (data) setShareId(data.id);
           } catch (e) {
-            console.error('Share ID 생성 실패:', e);
+            console.error("Share ID 생성 실패:", e);
           }
         }
       }
       setLoading(false);
     };
     fetchData();
-  }, []);
+  }, [language]);
 
   useEffect(() => {
     const kakaoKey = import.meta.env.VITE_KAKAO_JS_KEY;
