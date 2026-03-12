@@ -82,53 +82,58 @@ export function KakaoPreview() {
     setSharing(true);
     const baseUrl = window.location.origin;
     
-    // 선택된 아이템들을 텍스트 리스트로 변환
+    // 선택된 아이템들을 텍스트 리스트로 변환 (최대 5개)
     const itemsText = selectedItems
       .slice(0, 5)
-      .map(item => `• ${item.name}: ₩${item.price.toLocaleString()}`)
+      .map(item => `• ${item.name}`)
       .join('\n');
     
-    const moreText = selectedItems.length > 5 ? `\n외 ${selectedItems.length - 5}개 항목 더보기` : '';
+    const moreText = selectedItems.length > 5 ? `\n...외 ${selectedItems.length - 5}개 항목 더보기` : '';
     const mainItem = selectedItems[0];
+    
+    // 이미지 URL이 없거나 상대 경로인 경우 기본 이미지 사용
+    const imageUrl = (mainItem?.image && mainItem.image.startsWith('http')) 
+      ? mainItem.image 
+      : 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80';
 
     try {
-      // 리스트 템플릿 대신 피드 템플릿 사용 (클릭 시 전체 페이지로 이동 유도)
+      console.log('카카오 공유 시도:', {
+        baseUrl,
+        itemsCount: selectedItems.length,
+        cityName: selectedCityName
+      });
+
       window.Kakao.Share.sendDefault({
         objectType: 'feed',
         content: {
           title: `✈️ ${selectedCityName} 여행 견적서`,
           description: `${itemsText}${moreText}\n\n총 예상 비용: ₩${totalPrice.toLocaleString()}`,
-          imageUrl: mainItem?.image || 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=800&q=80',
+          imageUrl: imageUrl,
           link: {
-            mobileWebUrl: `${baseUrl}/kakao-preview`,
-            webUrl: `${baseUrl}/kakao-preview`,
+            mobileWebUrl: baseUrl + '/kakao-preview',
+            webUrl: baseUrl + '/kakao-preview',
           },
-        },
-        social: {
-          likeCount: 10,
-          commentCount: 20,
-          sharedCount: 30,
         },
         buttons: [
           {
             title: '상세 견적 보기',
             link: {
-              mobileWebUrl: `${baseUrl}/kakao-preview`,
-              webUrl: `${baseUrl}/kakao-preview`,
+              mobileWebUrl: baseUrl + '/kakao-preview',
+              webUrl: baseUrl + '/kakao-preview',
             },
           },
           {
             title: '나도 견적 받기',
             link: {
-              mobileWebUrl: `${baseUrl}/step-calculator`,
-              webUrl: `${baseUrl}/step-calculator`,
+              mobileWebUrl: baseUrl + '/step-calculator',
+              webUrl: baseUrl + '/step-calculator',
             },
           },
         ],
       });
     } catch (e) {
       console.error('카카오 공유 실패:', e);
-      alert('공유 중 오류가 발생했습니다.');
+      alert('공유 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
       setSharing(false);
     }
