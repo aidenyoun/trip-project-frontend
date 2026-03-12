@@ -146,20 +146,65 @@ export function AdminDashboard() {
     const handleBatchTranslate = async () => {
         setTranslating(true);
         try {
-            const { data: { session } } = await supabase.auth.getSession();
-            const response = await fetch(
-                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${session?.access_token}`,
-                    },
-                    body: JSON.stringify({ batch: true }),
-                }
+            // 미번역 아이템 목록 먼저 조회
+            const { data: allItems } = await supabase
+                .from("items")
+                .select("id")
+                .eq("is_active", true);
+
+            const { data: translated } = await supabase
+                .from("item_translations")
+                .select("item_id, lang");
+
+            const translatedMap = new Set(
+                translated?.map(t => `${t.item_id}_${t.lang}`) || []
             );
-            const result = await response.json();
-            alert(`번역 완료: ${result.results?.length || 0}개 항목`);
+
+            const untranslatedIds = (allItems || [])
+                .filter(item =>
+                    !translatedMap.has(`${item.id}_en`) ||
+                    !translatedMap.has(`${item.id}_ja`)
+                )
+                .map(item => item.id);
+
+            if (untranslatedIds.length === 0) {
+                alert("번역할 항목이 없습니다.");
+                return;
+            }
+
+            // 5개씩 나눠서 순차 호출
+            const CHUNK_SIZE = 5;
+            const { data: { session } } = await supabase.auth.getSession();
+            let completed = 0;
+
+            for (let i = 0; i < untranslatedIds.length; i += CHUNK_SIZE) {
+                const chunk = untranslatedIds.slice(i, i + CHUNK_SIZE);
+
+                await Promise.all(chunk.map(item_id =>
+                    fetch(
+                        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`,
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": `Bearer ${session?.access_token}`,
+                            },
+                            body: JSON.stringify({ item_id }),
+                        }
+                    )
+                ));
+
+                completed += chunk.length;
+                // 진행률 표시를 위해 stats 갱신
+                setTranslationStats(prev => ({
+                    ...prev,
+                    translated_en: completed,
+                    translated_ja: completed,
+                }));
+            }
+
+            alert(`번역 완료: ${completed}개 항목`);
+
         } catch (e) {
             alert("번역 중 오류 발생");
         } finally {
