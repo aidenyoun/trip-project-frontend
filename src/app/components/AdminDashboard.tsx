@@ -94,6 +94,11 @@ export function AdminDashboard() {
         total: 0, translated_en: 0, translated_ja: 0
     });
     const [translating, setTranslating] = useState(false);
+    const [translateProgress, setTranslateProgress] = useState<{
+        current: number;
+        total: number;
+        startTime: number;
+    } | null>(null);
 
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
@@ -142,24 +147,20 @@ export function AdminDashboard() {
         navigate('/admin');
     };
 
-    // ✅ 일괄 번역 handler (컴포넌트 내부로 이동)
+    // ✅ 일괄 번역 handler - 1개씩 순차 호출 + 진행률 표시
     const handleBatchTranslate = async () => {
         setTranslating(true);
+        setTranslateProgress(null);
         try {
-            // 미번역 아이템 목록 먼저 조회
+            // 미번역 아이템 목록 조회
             const { data: allItems } = await supabase
-                .from("items")
-                .select("id")
-                .eq("is_active", true);
-
+                .from("items").select("id").eq("is_active", true);
             const { data: translated } = await supabase
-                .from("item_translations")
-                .select("item_id, lang");
+                .from("item_translations").select("item_id, lang");
 
             const translatedMap = new Set(
                 translated?.map(t => `${t.item_id}_${t.lang}`) || []
             );
-
             const untranslatedIds = (allItems || [])
                 .filter(item =>
                     !translatedMap.has(`${item.id}_en`) ||
@@ -172,11 +173,13 @@ export function AdminDashboard() {
                 return;
             }
 
-            // 5개씩 나눠서 순차 호출
-            const CHUNK_SIZE = 5;
             const { data: { session } } = await supabase.auth.getSession();
-            let completed = 0;
+            const total = untranslatedIds.length;
+            const startTime = Date.now();
+            setTranslateProgress({ current: 0, total, startTime });
 
+            // 5개씩 병렬 처리
+            const CHUNK_SIZE = 5;
             for (let i = 0; i < untranslatedIds.length; i += CHUNK_SIZE) {
                 const chunk = untranslatedIds.slice(i, i + CHUNK_SIZE);
 
@@ -194,21 +197,26 @@ export function AdminDashboard() {
                     )
                 ));
 
-                completed += chunk.length;
-                // 진행률 표시를 위해 stats 갱신
-                setTranslationStats(prev => ({
-                    ...prev,
-                    translated_en: completed,
-                    translated_ja: completed,
-                }));
+                setTranslateProgress({
+                    current: Math.min(i + CHUNK_SIZE, total),
+                    total,
+                    startTime,
+                });
             }
 
-            alert(`번역 완료: ${completed}개 항목`);
+            // 완료 후 stats 갱신
+            const { count: en } = await supabase
+                .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "en");
+            const { count: ja } = await supabase
+                .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "ja");
+            setTranslationStats(prev => ({ ...prev, translated_en: en || 0, translated_ja: ja || 0 }));
 
+            alert(`✅ 번역 완료: ${total}개 항목`);
         } catch (e) {
             alert("번역 중 오류 발생");
         } finally {
             setTranslating(false);
+            setTranslateProgress(null);
         }
     };
 
@@ -401,42 +409,82 @@ export function AdminDashboard() {
     const topItems = [...items].sort((a, b) => b.click_count - a.click_count).slice(0, 5);
     const cityLabels = Object.fromEntries(cities.map(c => [c.id, c.name]));
 
-    // ✅ TranslationPanel 컴포넌트 (내부 정의로 state 접근 가능)
-    const TranslationPanel = () => (
-        <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">🌐 번역 현황</h2>
-            <div className="grid grid-cols-3 gap-4 mb-4">
-                <div className="text-center p-3 bg-gray-50 rounded-xl">
-                    <p className="text-2xl font-black text-gray-900">{translationStats.total}</p>
-                    <p className="text-xs text-gray-500 mt-1">전체 아이템</p>
+    // ✅ TranslationPanel 컴포넌트 - 진행률 표시 포함
+    const TranslationPanel = () => {
+        const pct = translateProgress
+            ? Math.round((translateProgress.current / translateProgress.total) * 100)
+            : 0;
+
+        const remainingSec = (() => {
+            if (!translateProgress || translateProgress.current === 0) return null;
+            const elapsed = (Date.now() - translateProgress.startTime) / 1000;
+            const perItem = elapsed / translateProgress.current;
+            const remaining = perItem * (translateProgress.total - translateProgress.current);
+            if (remaining < 60) return `약 ${Math.ceil(remaining)}초`;
+            return `약 ${Math.ceil(remaining / 60)}분`;
+        })();
+
+        return (
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                <h2 className="text-lg font-bold text-gray-900 mb-4">🌐 번역 현황</h2>
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div className="text-center p-3 bg-gray-50 rounded-xl">
+                        <p className="text-2xl font-black text-gray-900">{translationStats.total}</p>
+                        <p className="text-xs text-gray-500 mt-1">전체 아이템</p>
+                    </div>
+                    <div className="text-center p-3 bg-blue-50 rounded-xl">
+                        <p className="text-2xl font-black text-blue-600">{translationStats.translated_en}</p>
+                        <p className="text-xs text-blue-400 mt-1">영어 번역 완료</p>
+                    </div>
+                    <div className="text-center p-3 bg-red-50 rounded-xl">
+                        <p className="text-2xl font-black text-red-500">{translationStats.translated_ja}</p>
+                        <p className="text-xs text-red-400 mt-1">일본어 번역 완료</p>
+                    </div>
                 </div>
-                <div className="text-center p-3 bg-blue-50 rounded-xl">
-                    <p className="text-2xl font-black text-blue-600">{translationStats.translated_en}</p>
-                    <p className="text-xs text-blue-400 mt-1">영어 번역 완료</p>
-                </div>
-                <div className="text-center p-3 bg-red-50 rounded-xl">
-                    <p className="text-2xl font-black text-red-500">{translationStats.translated_ja}</p>
-                    <p className="text-xs text-red-400 mt-1">일본어 번역 완료</p>
-                </div>
-            </div>
-            {(translationStats.translated_en < translationStats.total ||
-                translationStats.translated_ja < translationStats.total) && (
-                <button
-                    onClick={handleBatchTranslate}
-                    disabled={translating}
-                    className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
-                >
-                    {translating
-                        ? "번역 중... (시간이 걸릴 수 있습니다)"
-                        : `미번역 ${translationStats.total - Math.min(translationStats.translated_en, translationStats.translated_ja)}개 일괄 번역`}
-                </button>
-            )}
-            {translationStats.translated_en >= translationStats.total &&
-                translationStats.translated_ja >= translationStats.total && (
-                    <p className="text-center text-sm text-green-600 font-medium">✅ 모든 아이템 번역 완료</p>
+
+                {/* 진행 중 UI */}
+                {translating && translateProgress && (
+                    <div className="mb-4">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-semibold text-gray-700">
+                                {translateProgress.current} / {translateProgress.total}개 번역 중...
+                            </span>
+                            <span className="text-xs text-gray-400">
+                                {remainingSec ? `${remainingSec} 남음` : "계산 중..."}
+                            </span>
+                        </div>
+                        <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full transition-all duration-500"
+                                style={{ width: `${pct}%` }}
+                            />
+                        </div>
+                        <div className="flex items-center justify-between mt-1.5">
+                            <p className="text-xs text-orange-500 font-medium">⚠ 번역 중 페이지를 닫지 마세요</p>
+                            <p className="text-xs text-gray-400">{pct}%</p>
+                        </div>
+                    </div>
                 )}
-        </div>
-    );
+
+                {(translationStats.translated_en < translationStats.total ||
+                    translationStats.translated_ja < translationStats.total) && (
+                    <button
+                        onClick={handleBatchTranslate}
+                        disabled={translating}
+                        className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    >
+                        {translating
+                            ? `번역 중... (${translateProgress?.current || 0}/${translateProgress?.total || 0})`
+                            : `미번역 ${translationStats.total - Math.min(translationStats.translated_en, translationStats.translated_ja)}개 일괄 번역`}
+                    </button>
+                )}
+                {translationStats.translated_en >= translationStats.total &&
+                    translationStats.translated_ja >= translationStats.total && (
+                        <p className="text-center text-sm text-green-600 font-medium">✅ 모든 아이템 번역 완료</p>
+                    )}
+            </div>
+        );
+    };
 
     return (
         <div className="min-h-screen bg-gray-50">
