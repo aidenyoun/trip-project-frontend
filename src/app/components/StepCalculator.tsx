@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { ArrowLeft, Check } from "lucide-react";
-import { supabase } from "../../../supabase";
+import { supabase } from "../../supabase";
 
 interface TravelItem {
   id: string;
