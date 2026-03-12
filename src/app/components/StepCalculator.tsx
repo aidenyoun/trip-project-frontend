@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { ArrowLeft, Check } from "lucide-react";
+import { supabase } from "../../../supabase";
 
 interface TravelItem {
   id: string;
@@ -11,6 +12,7 @@ interface TravelItem {
   price: number;
   image: string;
   description: string;
+  affiliate_link: string | null;
 }
 
 const CITIES = [
@@ -26,188 +28,33 @@ const STEPS = [
   { id: 'activities', name: 'Activities', icon: '💆', label: '액티비티' },
 ];
 
-const TRAVEL_ITEMS: TravelItem[] = [
-  // Bangkok Items
-  // ACCOMMODATION
-  {
-    id: "hotel-5star-bkk",
-    city: "bangkok",
-    category: "accommodation",
-    name: "5성급 럭셔리 호텔 (3박)",
-    price: 450000,
-    image: "https://images.unsplash.com/photo-1646974400439-321c4a9240b9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxsdXh1cnklMjBob3RlbCUyMHJvb20lMjBCYW5na29rJTIwbW9kZXJufGVufDF8fHx8MTc3MzI3OTQ5M3ww&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "인피니티 풀 & 조식 포함, 시암 지역"
-  },
-  {
-    id: "hotel-4star-bkk",
-    city: "bangkok",
-    category: "accommodation",
-    name: "4성급 부티크 호텔 (3박)",
-    price: 320000,
-    image: "https://images.unsplash.com/photo-1646974400439-321c4a9240b9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxsdXh1cnklMjBob3RlbCUyMHJvb20lMjBCYW5na29rJTIwbW9kZXJufGVufDF8fHx8MTc3MzI3OTQ5M3ww&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "수영장 포함, 수쿰윗 역 근처"
-  },
-
-  // TRANSPORT
-  {
-    id: "airport-limo-bkk",
-    city: "bangkok",
-    category: "transport",
-    name: "공항 리무진 서비스",
-    price: 85000,
-    image: "https://images.unsplash.com/photo-1771248647341-9d8f567b051d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcmVtaXVtJTIwdmFuJTIwdHJhbnNwb3J0YXRpb24lMjBsdXh1cnl8ZW58MXx8fHwxNzczMjgzMjUyfDA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "호텔 픽업&드랍, 고급 세단"
-  },
-  {
-    id: "bts-pass-bkk",
-    city: "bangkok",
-    category: "transport",
-    name: "BTS 3일 무제한 패스",
-    price: 35000,
-    image: "https://images.unsplash.com/photo-1542382257-80dedb725088?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxza3l0cmFpbiUyMHN1YndheXxlbnwxfHx8fDE3NzMyODc1Njh8MA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "BTS 스카이트레인 무제한 이용"
-  },
-
-  // TOURS
-  {
-    id: "night-tour-bkk",
-    city: "bangkok",
-    category: "tours",
-    name: "방콕 나이트 투어",
-    price: 85000,
-    image: "https://images.unsplash.com/photo-1734069956282-aabac27c33bf?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxCYW5na29rJTIwbmlnaHQlMjBtYXJrZXQlMjBzdHJlZXQlMjBmb29kfGVufDF8fHx8MTc3MzI3OTQ5NHww&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "야시장 & 야경 크루즈, 디너 포함"
-  },
-
-  // ACTIVITIES
-  {
-    id: "thai-massage-bkk",
-    city: "bangkok",
-    category: "activities",
-    name: "태국 전통 마사지 & 스파",
-    price: 55000,
-    image: "https://images.unsplash.com/photo-1596178060671-7a80dc8059ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxUaGFpJTIwbWFzc2FnZSUyMHNwYSUyMHdlbGxuZXNzfGVufDF8fHx8MTc3MzI3OTQ5NXww&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "2시간 프리미엄 힐링 코스"
-  },
-
-  // Da Nang Items
-  {
-    id: "hotel-5star-dn",
-    city: "danang",
-    category: "accommodation",
-    name: "5성급 비치 리조트 (3박)",
-    price: 420000,
-    image: "https://images.unsplash.com/photo-1723515087351-51d2fa9e642d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxEYSUyME5hbmclMjBWaWV0bmFtJTIwYmVhY2glMjByZXNvcnR8ZW58MXx8fHwxNzczMjgzMjUxfDA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "오션뷰 & 프라이빗 비치, 올인클루시브"
-  },
-  {
-    id: "premium-van-dn",
-    city: "danang",
-    category: "transport",
-    name: "16인승 프리미엄 밴 (공항 픽업)",
-    price: 95000,
-    image: "https://images.unsplash.com/photo-1771248647341-9d8f567b051d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcmVtaXVtJTIwdmFuJTIwdHJhbnNwb3J0YXRpb24lMjBsdXh1cnl8ZW58MXx8fHwxNzczMjgzMjUyfDA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "럭셔리 차량, 에어컨 완비"
-  },
-  {
-    id: "cable-car-dn",
-    city: "danang",
-    category: "tours",
-    name: "바나힐 케이블카 & 테마파크",
-    price: 68000,
-    image: "https://images.unsplash.com/photo-1613313274321-a41a1b61233c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjYWJsZSUyMGNhciUyMG1vdW50YWluJTIwdmlldyUyMFZpZXRuYW18ZW58MXx8fHwxNzczMjgzMjUzfDA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "골든 브릿지 & 테마파크 입장권"
-  },
-  {
-    id: "massage-dn",
-    city: "danang",
-    category: "activities",
-    name: "베트남 전통 마사지",
-    price: 45000,
-    image: "https://images.unsplash.com/photo-1596178060671-7a80dc8059ea?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxUaGFpJTIwbWFzc2FnZSUyMHNwYSUyMHdlbGxuZXNzfGVufDF8fHx8MTc3MzI3OTQ5NXww&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "90분 풀 바디 마사지"
-  },
-
-  // Tokyo Items
-  {
-    id: "hotel-tokyo-shinjuku",
-    city: "tokyo",
-    category: "accommodation",
-    name: "신주쿠 그레이서리 호텔 (3박)",
-    price: 580000,
-    image: "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxUb2t5byUyMGhvdGVsJTIwcm9vbXxlbnwxfHx8fDE3NzMyOTM0NTR8MA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "고질라 헤드 뷰, 역세권"
-  },
-  {
-    id: "hotel-tokyo-ryokan",
-    city: "tokyo",
-    category: "accommodation",
-    name: "도심 속 전통 료칸 (3박)",
-    price: 750000,
-    image: "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxyeW9rYW4lMjBqYXBhbiUyMGhvdGVsJTIwdHJhZGl0aW9uYWx8ZW58MXx8fHwxNzczMjkzNDU1fDA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "온천 및 가이세키 요리 포함"
-  },
-  {
-    id: "suica-pass-tokyo",
-    city: "tokyo",
-    category: "transport",
-    name: "웰컴 스이카 (Welcome Suica)",
-    price: 35000,
-    image: "https://images.unsplash.com/photo-1510253406560-63664797099e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxKYXBhbiUyMHRyYWluJTIwcGFzc3xlbnwxfHx8fDE3NzMyOTM0NTZ8MA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "도쿄 지하철 무제한 & 충전식 카드"
-  },
-  {
-    id: "skyliner-tokyo",
-    city: "tokyo",
-    category: "transport",
-    name: "나리타 스카이라이너 (왕복)",
-    price: 48000,
-    image: "https://images.unsplash.com/photo-1532551400262-e6e23253b754?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxKYXBhbiUyMGhpZ2glMjBzcGVlZCUyMHRyYWluJTIwc2hpbmthbnNlbnxlbnwxfHx8fDE3NzMyOTM0NTZ8MA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "나리타 공항 - 시내 36분 주파"
-  },
-  {
-    id: "disney-tokyo",
-    city: "tokyo",
-    category: "tours",
-    name: "도쿄 디즈니랜드 1일권",
-    price: 95000,
-    image: "https://images.unsplash.com/photo-1545129139-1beb780cf337?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxkaXNuZXlsYW5kJTIwdG9reW98ZW58MXx8fHwxNzczMjkzNDU2fDA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "꿈과 희망의 나라 디즈니랜드 입장권"
-  },
-  {
-    id: "teamlab-tokyo",
-    city: "tokyo",
-    category: "tours",
-    name: "팀랩 플래닛 도쿄 (teamLab)",
-    price: 38000,
-    image: "https://images.unsplash.com/photo-1550985543-f47f547499aa?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx0ZWFtbGFiJTIwcGxhbmV0cyUyMHRva3lvfGVufDF8fHx8MTc3MzI5MzQ1N3ww&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "디지털 아트 박물관 체험형 전시"
-  },
-  {
-    id: "omakase-tokyo",
-    city: "tokyo",
-    category: "activities",
-    name: "긴자 스시 오마카세",
-    price: 250000,
-    image: "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzdXNoaSUyMG9tYWthc2UlMjBkaW5uZXJ8ZW58MXx8fHwxNzczMjkzNDU3fDA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "현지 장인이 쥐어주는 프리미엄 스시"
-  },
-  {
-    id: "shibuya-sky-tokyo",
-    city: "tokyo",
-    category: "activities",
-    name: "시부야 스카이 전망대",
-    price: 22000,
-    image: "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxTaGlidXlhJTIwU2t5JTIwdmlld3xlbnwxfHx8fDE3NzMyOTM0NTd8MA&ixlib=rb-4.1.0&q=80&w=1080",
-    description: "시부야 최상층 야경 및 포토존"
-  },
-];
-
 export function StepCalculator() {
   const navigate = useNavigate();
   const [selectedCity, setSelectedCity] = useState('bangkok');
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [allItems, setAllItems] = useState<TravelItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Supabase에서 전체 데이터 한 번만 로드
+  useEffect(() => {
+    const fetchItems = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+          .from('items')
+          .select('*')
+          .eq('is_active', true);
+
+      if (error) {
+        console.error('데이터 로드 실패:', error);
+      } else {
+        setAllItems(data || []);
+      }
+      setLoading(false);
+    };
+
+    fetchItems();
+  }, []);
 
   const currentCategory = STEPS[currentStep].id;
   const currentStepInfo = STEPS[currentStep];
@@ -228,7 +75,7 @@ export function StepCalculator() {
     setSelectedItems(newSelected);
   };
 
-  const filteredItems = TRAVEL_ITEMS.filter(
+  const filteredItems = allItems.filter(
       item => item.city === selectedCity && item.category === currentCategory
   );
 
@@ -255,7 +102,7 @@ export function StepCalculator() {
       setCurrentStep(currentStep + 1);
       window.scrollTo(0, 0);
     } else {
-      const selectedItemsList = TRAVEL_ITEMS.filter(item => selectedItems.has(item.id));
+      const selectedItemsList = allItems.filter(item => selectedItems.has(item.id));
       const totalPrice = selectedItemsList.reduce((sum, item) => sum + item.price, 0);
 
       localStorage.setItem('selectedItems', JSON.stringify(selectedItemsList));
@@ -365,7 +212,6 @@ export function StepCalculator() {
 
         {/* 메인 콘텐츠 */}
         <div className="max-w-2xl mx-auto px-4 py-5">
-          {/* 스텝 타이틀 */}
           <div className="mb-4">
             <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
@@ -384,14 +230,20 @@ export function StepCalculator() {
             </p>
           </div>
 
-          {/* 품목 리스트 */}
-          <div className="space-y-3">
-            {filteredItems.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                  <p>No items available in this category.</p>
-                </div>
-            ) : (
-                filteredItems.map(item => {
+          {/* 로딩 스켈레톤 */}
+          {loading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map(i => (
+                    <div key={i} className="bg-gray-100 rounded-xl h-24 animate-pulse" />
+                ))}
+              </div>
+          ) : filteredItems.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <p>No items available in this category.</p>
+              </div>
+          ) : (
+              <div className="space-y-3">
+                {filteredItems.map(item => {
                   const isSelected = selectedItems.has(item.id);
                   return (
                       <div
@@ -404,7 +256,6 @@ export function StepCalculator() {
                           }`}
                       >
                         <div className="flex items-center gap-3 p-3">
-                          {/* 썸네일 */}
                           <div className="w-16 h-16 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
                             <ImageWithFallback
                                 src={item.image}
@@ -412,8 +263,6 @@ export function StepCalculator() {
                                 className="w-full h-full object-cover"
                             />
                           </div>
-
-                          {/* 내용 */}
                           <div className="flex-1 min-w-0">
                             <h3 className="text-sm font-medium text-gray-900 mb-0.5 line-clamp-1">
                               {item.name}
@@ -425,8 +274,6 @@ export function StepCalculator() {
                               ₩{item.price.toLocaleString()}
                             </p>
                           </div>
-
-                          {/* 체크박스 */}
                           <div className="flex-shrink-0">
                             <div
                                 className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
@@ -435,39 +282,33 @@ export function StepCalculator() {
                                         : 'bg-white border-gray-300'
                                 }`}
                             >
-                              {isSelected && (
-                                  <Check className="w-3 h-3 text-white" />
-                              )}
+                              {isSelected && <Check className="w-3 h-3 text-white" />}
                             </div>
                           </div>
                         </div>
                       </div>
                   );
-                })
-            )}
-          </div>
+                })}
+              </div>
+          )}
         </div>
 
-        {/* 하단 고정 푸터 — 컴팩트 */}
+        {/* 하단 고정 푸터 */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-10">
           <div className="max-w-2xl mx-auto px-4 py-3">
-            {/* 예산 표시 — 인라인으로 작게 */}
             <div className="flex items-center justify-center gap-2 mb-2">
               <p className="text-xs text-gray-400">Estimated Budget</p>
               <p className="text-sm font-semibold text-gray-800">
                 {selectedItemsInCurrentCategory.length > 0 ? (
-                    priceRange.min === priceRange.max ? (
-                        `₩${priceRange.min.toLocaleString()}`
-                    ) : (
-                        `₩${priceRange.min.toLocaleString()} ~ ₩${priceRange.max.toLocaleString()}`
-                    )
+                    priceRange.min === priceRange.max
+                        ? `₩${priceRange.min.toLocaleString()}`
+                        : `₩${priceRange.min.toLocaleString()} ~ ₩${priceRange.max.toLocaleString()}`
                 ) : (
                     `₩${priceRange.min.toLocaleString()} ~ ₩${priceRange.max.toLocaleString()}`
                 )}
               </p>
             </div>
 
-            {/* Next 버튼 */}
             <button
                 onClick={handleNext}
                 disabled={!canProceed}
