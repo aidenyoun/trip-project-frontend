@@ -4,7 +4,8 @@ import { supabase } from "../../supabase";
 import * as XLSX from 'xlsx';
 import {
     LogOut, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
-    BarChart2, Package, Link, X, Check, Globe, FileUp, Download, Info, AlertCircle
+    BarChart2, Package, Link, X, Check, Globe, FileUp, Download,
+    Info, AlertCircle, Image, Loader2
 } from "lucide-react";
 
 interface TravelItem {
@@ -34,7 +35,6 @@ const CATEGORY_LABELS: Record<string, string> = {
     accommodation: '숙소', transport: '교통', tours: '투어', activities: '액티비티'
 };
 
-// 한글 헤더와 영문 필드 매핑
 const EXCEL_HEADER_MAP: Record<string, string> = {
     '도시 ID': 'city',
     '카테고리': 'category',
@@ -55,6 +55,39 @@ const EMPTY_CITY_FORM = { id: '', name: '', emoji: '🌏', is_active: true };
 
 type Tab = 'items' | 'cities' | 'stats';
 
+// ──────────────────────────────────────────────
+// 이미지 URL → Supabase Storage 자동 복사
+// ──────────────────────────────────────────────
+const BUCKET = 'item-images';
+
+async function uploadImageToStorage(imageUrl: string, itemId: string): Promise<string> {
+    if (!imageUrl || !imageUrl.startsWith('http')) return imageUrl;
+
+    try {
+        // corsproxy.io로 CORS 우회
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(imageUrl)}`;
+        const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const blob = await res.blob();
+        const mimeType = blob.type || 'image/jpeg';
+        const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
+        const fileName = `items/${itemId}.${ext}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from(BUCKET)
+            .upload(fileName, blob, { upsert: true, contentType: mimeType });
+
+        if (uploadError) throw uploadError;
+
+        const { data } = supabase.storage.from(BUCKET).getPublicUrl(fileName);
+        return data.publicUrl;
+    } catch (e) {
+        console.warn('이미지 Storage 업로드 실패, 원본 URL 유지:', imageUrl, e);
+        return imageUrl; // 실패 시 원본 URL 그대로 사용
+    }
+}
+
 export function AdminDashboard() {
     const navigate = useNavigate();
     const [tab, setTab] = useState<Tab>('items');
@@ -71,6 +104,7 @@ export function AdminDashboard() {
     const [filterCategory, setFilterCategory] = useState('all');
     const [sortBy, setSortBy] = useState<'created_at' | 'click_count'>('created_at');
     const [isBulkUploading, setIsBulkUploading] = useState(false);
+    const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null);
     const [showExcelHelp, setShowExcelHelp] = useState(false);
 
     // 도시 상태
@@ -88,7 +122,6 @@ export function AdminDashboard() {
         });
     }, []);
 
-    // 도시 로드
     const fetchCities = async () => {
         setCitiesLoading(true);
         const { data } = await supabase.from('cities').select('*').order('created_at', { ascending: true });
@@ -96,7 +129,6 @@ export function AdminDashboard() {
         setCitiesLoading(false);
     };
 
-    // 품목 로드
     const fetchItems = async () => {
         setItemsLoading(true);
         const { data } = await supabase.from('items').select('*').order(sortBy, { ascending: false });
@@ -107,19 +139,13 @@ export function AdminDashboard() {
     useEffect(() => { fetchCities(); fetchItems(); }, []);
     useEffect(() => { fetchItems(); }, [sortBy]);
 
-    // 로그아웃
     const handleLogout = async () => {
         await supabase.auth.signOut();
         navigate('/admin');
     };
 
     // ── 도시 관리 ──
-    const openCreateCityForm = () => {
-        setEditingCity(null);
-        setCityForm(EMPTY_CITY_FORM);
-        setShowCityForm(true);
-    };
-
+    const openCreateCityForm = () => { setEditingCity(null); setCityForm(EMPTY_CITY_FORM); setShowCityForm(true); };
     const openEditCityForm = (city: City) => {
         setEditingCity(city);
         setCityForm({ id: city.id, name: city.name, emoji: city.emoji, is_active: city.is_active });
@@ -129,22 +155,11 @@ export function AdminDashboard() {
     const handleSaveCity = async () => {
         if (!cityForm.name || !cityForm.id) return alert('ID와 이름은 필수입니다.');
         setSavingCity(true);
-
         if (editingCity) {
-            await supabase.from('cities').update({
-                name: cityForm.name,
-                emoji: cityForm.emoji,
-                is_active: cityForm.is_active,
-            }).eq('id', editingCity.id);
+            await supabase.from('cities').update({ name: cityForm.name, emoji: cityForm.emoji, is_active: cityForm.is_active }).eq('id', editingCity.id);
         } else {
-            await supabase.from('cities').insert({
-                id: cityForm.id.toLowerCase().replace(/\s+/g, '-'),
-                name: cityForm.name,
-                emoji: cityForm.emoji,
-                is_active: cityForm.is_active,
-            });
+            await supabase.from('cities').insert({ id: cityForm.id.toLowerCase().replace(/\s+/g, '-'), name: cityForm.name, emoji: cityForm.emoji, is_active: cityForm.is_active });
         }
-
         setSavingCity(false);
         setShowCityForm(false);
         fetchCities();
@@ -184,13 +199,21 @@ export function AdminDashboard() {
         if (!itemForm.name || !itemForm.price) return alert('이름과 가격은 필수입니다.');
         setSavingItem(true);
 
+        const itemId = editingItem?.id || `${itemForm.category}-${Date.now()}`;
+
+        // 이미지 URL → Supabase Storage 자동 업로드
+        let finalImageUrl = itemForm.image;
+        if (itemForm.image && itemForm.image.startsWith('http')) {
+            finalImageUrl = await uploadImageToStorage(itemForm.image, itemId);
+        }
+
         const payload = {
             city: itemForm.city,
             category: itemForm.category,
             name: itemForm.name,
             description: itemForm.description,
             price: Number(itemForm.price),
-            image: itemForm.image,
+            image: finalImageUrl,
             affiliate_link: itemForm.affiliate_link || null,
             is_active: itemForm.is_active,
         };
@@ -198,7 +221,7 @@ export function AdminDashboard() {
         if (editingItem) {
             await supabase.from('items').update(payload).eq('id', editingItem.id);
         } else {
-            await supabase.from('items').insert({ id: `${itemForm.category}-${Date.now()}`, ...payload });
+            await supabase.from('items').insert({ id: itemId, ...payload });
         }
 
         setSavingItem(false);
@@ -217,68 +240,40 @@ export function AdminDashboard() {
         fetchItems();
     };
 
-    // ── 엑셀 대량 업로드 ──
+    // ── 엑셀 샘플 다운로드 ──
     const handleDownloadSample = () => {
         const sampleData = [
-            {
-                '도시 ID': 'tokyo',
-                '카테고리': 'accommodation',
-                '품목명': '도쿄 럭셔리 호텔',
-                '설명': '신주쿠역 도보 5분, 조식 포함',
-                '가격': 300000,
-                '이미지 URL': 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26',
-                '제휴 링크': 'https://www.agoda.com',
-                '활성화(Y/N)': 'Y'
-            },
-            {
-                '도시 ID': 'jeju',
-                '카테고리': 'transport',
-                '품목명': '전기차 렌트 (24시간)',
-                '설명': '보험 포함, 완전 자차',
-                '가격': 45000,
-                '이미지 URL': '',
-                '제휴 링크': '',
-                '활성화(Y/N)': 'Y'
-            }
+            { '도시 ID': 'tokyo', '카테고리': 'accommodation', '품목명': '도쿄 럭셔리 호텔', '설명': '신주쿠역 도보 5분, 조식 포함', '가격': 300000, '이미지 URL': 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26', '제휴 링크': 'https://www.agoda.com', '활성화(Y/N)': 'Y' },
+            { '도시 ID': 'jeju', '카테고리': 'transport', '품목명': '전기차 렌트 (24시간)', '설명': '보험 포함, 완전 자차', '가격': 45000, '이미지 URL': '', '제휴 링크': '', '활성화(Y/N)': 'Y' }
         ];
         const ws = XLSX.utils.json_to_sheet(sampleData);
-        
-        // 열 너비 조절
-        ws['!cols'] = [
-            { wch: 10 }, { wch: 15 }, { wch: 25 }, { wch: 30 },
-            { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 12 }
-        ];
-
+        ws['!cols'] = [{ wch: 10 }, { wch: 15 }, { wch: 25 }, { wch: 30 }, { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 12 }];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "품목업로드양식");
         XLSX.writeFile(wb, "여행품목_업로드_양식.xlsx");
     };
 
+    // ── 엑셀 대량 업로드 + 이미지 자동 Storage 저장 ──
     const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         setIsBulkUploading(true);
+        setBulkProgress(null);
+
         const reader = new FileReader();
         reader.onload = async (evt) => {
             try {
                 const bstr = evt.target?.result;
                 const wb = XLSX.read(bstr, { type: 'binary' });
-                const wsname = wb.SheetNames[0];
-                const ws = wb.Sheets[wsname];
+                const ws = wb.Sheets[wb.SheetNames[0]];
                 const rows = XLSX.utils.sheet_to_json(ws) as any[];
 
-                if (rows.length === 0) {
-                    alert('업로드할 데이터가 없습니다.');
-                    return;
-                }
+                if (rows.length === 0) { alert('업로드할 데이터가 없습니다.'); return; }
 
-                const formattedItems = rows.map((row, index) => {
-                    const item: any = {
-                        id: `${row['카테고리'] || 'item'}-${Date.now()}-${index}`,
-                    };
-                    
-                    // 한글 헤더를 영문 필드로 매핑
+                // 1단계: 엑셀 데이터 파싱
+                const parsedItems = rows.map((row, index) => {
+                    const item: any = { id: `${row['카테고리'] || 'item'}-${Date.now()}-${index}` };
                     Object.entries(EXCEL_HEADER_MAP).forEach(([kr, en]) => {
                         let value = row[kr];
                         if (en === 'price') value = Number(value) || 0;
@@ -286,27 +281,38 @@ export function AdminDashboard() {
                         if (en === 'affiliate_link') value = value || null;
                         item[en] = value;
                     });
-                    
                     return item;
                 });
 
-                // 필수값 검증 (도시 ID, 카테고리, 이름)
-                const invalidRow = formattedItems.find(i => !i.city || !i.category || !i.name);
-                if (invalidRow) {
-                    alert('도시 ID, 카테고리, 품목명은 필수 입력 항목입니다.');
-                    return;
+                const invalidRow = parsedItems.find(i => !i.city || !i.category || !i.name);
+                if (invalidRow) { alert('도시 ID, 카테고리, 품목명은 필수 입력 항목입니다.'); return; }
+
+                // 2단계: 이미지 URL → Supabase Storage 순차 업로드
+                setBulkProgress({ current: 0, total: parsedItems.length });
+                const itemsWithImages = [];
+
+                for (let i = 0; i < parsedItems.length; i++) {
+                    const item = parsedItems[i];
+                    setBulkProgress({ current: i + 1, total: parsedItems.length });
+
+                    if (item.image && item.image.startsWith('http')) {
+                        item.image = await uploadImageToStorage(item.image, item.id);
+                    }
+                    itemsWithImages.push(item);
                 }
 
-                const { error } = await supabase.from('items').insert(formattedItems);
+                // 3단계: Supabase DB INSERT
+                const { error } = await supabase.from('items').insert(itemsWithImages);
                 if (error) throw error;
 
-                alert(`${formattedItems.length}개의 품목이 성공적으로 업로드되었습니다.`);
+                alert(`✅ ${itemsWithImages.length}개 품목 업로드 완료!\n이미지가 자동으로 서버에 저장되었습니다.`);
                 fetchItems();
             } catch (err) {
                 console.error('Upload Error:', err);
-                alert('업로드 중 오류가 발생했습니다. 엑셀 파일의 형식을 다시 확인해주세요.');
+                alert('업로드 중 오류가 발생했습니다. 엑셀 파일 형식을 다시 확인해주세요.');
             } finally {
                 setIsBulkUploading(false);
+                setBulkProgress(null);
                 if (fileInputRef.current) fileInputRef.current.value = '';
             }
         };
@@ -320,7 +326,6 @@ export function AdminDashboard() {
         return true;
     });
 
-    // 통계
     const totalClicks = items.reduce((sum, i) => sum + i.click_count, 0);
     const topItems = [...items].sort((a, b) => b.click_count - a.click_count).slice(0, 5);
     const cityLabels = Object.fromEntries(cities.map(c => [c.id, c.name]));
@@ -339,28 +344,18 @@ export function AdminDashboard() {
                             <p className="text-[10px] text-gray-400 font-medium tracking-wider uppercase">Admin Dashboard</p>
                         </div>
                     </div>
-                    <button
-                        onClick={handleLogout}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                    >
+                    <button onClick={handleLogout} className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
                         <LogOut className="w-3.5 h-3.5" /> 로그아웃
                     </button>
                 </div>
-
-                {/* 탭 */}
                 <div className="max-w-5xl mx-auto px-4 flex gap-1">
                     {[
                         { id: 'items', label: '품목 관리', icon: Package },
                         { id: 'cities', label: '나라/도시 관리', icon: Globe },
                         { id: 'stats', label: '클릭 통계', icon: BarChart2 },
                     ].map(t => (
-                        <button
-                            key={t.id}
-                            onClick={() => setTab(t.id as Tab)}
-                            className={`flex items-center gap-1.5 px-4 py-3 text-sm font-semibold border-b-2 transition-all ${
-                                tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'
-                            }`}
-                        >
+                        <button key={t.id} onClick={() => setTab(t.id as Tab)}
+                                className={`flex items-center gap-1.5 px-4 py-3 text-sm font-semibold border-b-2 transition-all ${tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                             <t.icon className={`w-4 h-4 ${tab === t.id ? 'text-blue-600' : 'text-gray-400'}`} />
                             {t.label}
                         </button>
@@ -373,40 +368,36 @@ export function AdminDashboard() {
                 {/* ── 품목 관리 탭 ── */}
                 {tab === 'items' && (
                     <div className="space-y-4">
-                        {/* 엑셀 안내 섹션 */}
+                        {/* 이미지 자동 저장 안내 */}
                         <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 flex items-start gap-3">
                             <Info className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
                             <div className="flex-1">
                                 <div className="flex items-center justify-between mb-1">
                                     <h3 className="text-sm font-bold text-blue-900">대량 업로드 가이드</h3>
-                                    <button 
-                                        onClick={() => setShowExcelHelp(!showExcelHelp)}
-                                        className="text-xs text-blue-600 font-medium hover:underline"
-                                    >
+                                    <button onClick={() => setShowExcelHelp(!showExcelHelp)} className="text-xs text-blue-600 font-medium hover:underline">
                                         {showExcelHelp ? '닫기' : '자세히 보기'}
                                     </button>
                                 </div>
                                 <p className="text-xs text-blue-700 leading-relaxed">
-                                    엑셀 파일을 사용하여 여러 품목을 한 번에 등록할 수 있습니다. 
-                                    반드시 <span className="font-bold underline cursor-pointer" onClick={handleDownloadSample}>양식 파일</span>을 먼저 다운로드하여 작성해 주세요.
+                                    엑셀 업로드 시 이미지가 <span className="font-bold">자동으로 서버에 저장</span>됩니다.
+                                    네이버, 인스타 등 어떤 외부 링크도 안정적인 URL로 변환해 드립니다.
                                 </p>
-                                
                                 {showExcelHelp && (
                                     <div className="mt-3 pt-3 border-t border-blue-200 grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div className="space-y-2">
-                                            <p className="text-xs font-bold text-blue-800">✅ 필수 입력값 안내</p>
+                                            <p className="text-xs font-bold text-blue-800">✅ 필수 입력값</p>
                                             <ul className="text-[11px] text-blue-700 space-y-1 list-disc ml-4">
-                                                <li><strong>도시 ID</strong>: '나라/도시 관리' 탭에 등록된 영문 ID (예: tokyo, bali)</li>
-                                                <li><strong>카테고리</strong>: accommodation, transport, tours, activities 중 하나</li>
-                                                <li><strong>품목명</strong>: 사용자에게 보여질 실제 상품 명칭</li>
+                                                <li><strong>도시 ID</strong>: 나라/도시 탭에 등록된 영문 ID (예: tokyo)</li>
+                                                <li><strong>카테고리</strong>: accommodation / transport / tours / activities</li>
+                                                <li><strong>품목명</strong>: 사용자에게 보여질 상품명</li>
                                             </ul>
                                         </div>
                                         <div className="space-y-2">
-                                            <p className="text-xs font-bold text-blue-800">💡 꿀팁</p>
+                                            <p className="text-xs font-bold text-blue-800">🖼️ 이미지 URL 안내</p>
                                             <ul className="text-[11px] text-blue-700 space-y-1 list-disc ml-4">
-                                                <li><strong>활성화</strong>: 'Y' 입력 시 즉시 노출, 'N' 입력 시 숨김 처리</li>
-                                                <li><strong>가격</strong>: 숫자만 입력하세요 (콤마 제외)</li>
-                                                <li><strong>이미지</strong>: Unsplash 등 외부 이미지 주소(http...)를 넣으세요</li>
+                                                <li>네이버, 인스타 등 <strong>외부 링크 모두 가능</strong></li>
+                                                <li>업로드 시 자동으로 서버 저장 → 안정적 URL로 교체</li>
+                                                <li>이미지 개수만큼 시간이 걸릴 수 있습니다</li>
                                             </ul>
                                         </div>
                                     </div>
@@ -414,105 +405,110 @@ export function AdminDashboard() {
                             </div>
                         </div>
 
+                        {/* 대량 업로드 진행 상황 */}
+                        {isBulkUploading && bulkProgress && (
+                            <div className="bg-white border border-blue-200 rounded-2xl p-4">
+                                <div className="flex items-center gap-3 mb-3">
+                                    <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                                    <div>
+                                        <p className="text-sm font-bold text-gray-900">
+                                            이미지 저장 중... ({bulkProgress.current}/{bulkProgress.total})
+                                        </p>
+                                        <p className="text-xs text-gray-500">외부 이미지를 서버에 복사하고 있습니다. 잠시만 기다려주세요.</p>
+                                    </div>
+                                </div>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                                        style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }}
+                                    />
+                                </div>
+                                <p className="text-xs text-gray-400 text-right mt-1">
+                                    {Math.round((bulkProgress.current / bulkProgress.total) * 100)}%
+                                </p>
+                            </div>
+                        )}
+
                         {/* 필터 및 액션 버튼 */}
                         <div className="flex flex-wrap items-center gap-2">
                             <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-2 py-1.5 shadow-sm">
-                                <select
-                                    value={filterCity}
-                                    onChange={e => setFilterCity(e.target.value)}
-                                    className="text-xs font-medium text-gray-600 bg-transparent border-none focus:ring-0 cursor-pointer"
-                                >
+                                <select value={filterCity} onChange={e => setFilterCity(e.target.value)}
+                                        className="text-xs font-medium text-gray-600 bg-transparent border-none focus:ring-0 cursor-pointer">
                                     <option value="all">모든 도시</option>
                                     {cities.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
                                 </select>
                                 <div className="w-[1px] h-3 bg-gray-200" />
-                                <select
-                                    value={filterCategory}
-                                    onChange={e => setFilterCategory(e.target.value)}
-                                    className="text-xs font-medium text-gray-600 bg-transparent border-none focus:ring-0 cursor-pointer"
-                                >
+                                <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
+                                        className="text-xs font-medium text-gray-600 bg-transparent border-none focus:ring-0 cursor-pointer">
                                     <option value="all">모든 카테고리</option>
                                     {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
                                 </select>
                             </div>
 
                             <div className="ml-auto flex items-center gap-2">
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={handleBulkUpload}
-                                    accept=".xlsx, .xls"
-                                    className="hidden"
-                                />
-                                
+                                <input type="file" ref={fileInputRef} onChange={handleBulkUpload} accept=".xlsx, .xls" className="hidden" />
                                 <div className="flex items-center p-1 bg-gray-100 rounded-xl">
-                                    <button
-                                        onClick={handleDownloadSample}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 text-gray-600 rounded-lg text-xs font-bold hover:bg-white hover:shadow-sm transition-all"
-                                    >
-                                        <Download className="w-3.5 h-3.5 text-gray-400" />
-                                        양식 다운로드
+                                    <button onClick={handleDownloadSample}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-gray-600 rounded-lg text-xs font-bold hover:bg-white hover:shadow-sm transition-all">
+                                        <Download className="w-3.5 h-3.5 text-gray-400" /> 양식 다운로드
                                     </button>
-                                    <button
-                                        onClick={() => fileInputRef.current?.click()}
-                                        disabled={isBulkUploading}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-green-600 rounded-lg text-xs font-bold shadow-sm hover:text-green-700 transition-all disabled:opacity-50"
-                                    >
-                                        <FileUp className="w-3.5 h-3.5" />
-                                        {isBulkUploading ? '업로드 중...' : '엑셀 업로드'}
+                                    <button onClick={() => fileInputRef.current?.click()} disabled={isBulkUploading}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-green-600 rounded-lg text-xs font-bold shadow-sm hover:text-green-700 transition-all disabled:opacity-50">
+                                        {isBulkUploading
+                                            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 처리 중...</>
+                                            : <><FileUp className="w-3.5 h-3.5" /> 엑셀 업로드</>
+                                        }
                                     </button>
                                 </div>
-
-                                <button
-                                    onClick={openCreateItemForm}
-                                    className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-100 transition-all active:scale-95"
-                                >
+                                <button onClick={openCreateItemForm}
+                                        className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-100 transition-all active:scale-95">
                                     <Plus className="w-4 h-4" /> 품목 추가
                                 </button>
                             </div>
                         </div>
 
                         {itemsLoading ? (
-                            <div className="space-y-2">
-                                {[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}
-                            </div>
+                            <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
                         ) : (
                             <div className="space-y-2">
                                 {filteredItems.map(item => (
                                     <div key={item.id} className={`bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4 hover:border-blue-200 hover:shadow-md transition-all group ${!item.is_active ? 'opacity-50 grayscale' : ''}`}>
                                         <div className="w-14 h-14 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0 border border-gray-100">
-                                            {item.image ? (
-                                                <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="w-full h-full flex items-center justify-center text-gray-300">
-                                                    <Package className="w-6 h-6" />
-                                                </div>
-                                            )}
+                                            {item.image
+                                                ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                                                : <div className="w-full h-full flex items-center justify-center text-gray-300"><Image className="w-6 h-6" /></div>
+                                            }
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-1.5 mb-1">
-                                                <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold">
-                                                  {cityLabels[item.city] || item.city}
-                                                </span>
-                                                <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold">
-                                                  {CATEGORY_LABELS[item.category]}
-                                                </span>
+                                                <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold">{cityLabels[item.city] || item.city}</span>
+                                                <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold">{CATEGORY_LABELS[item.category]}</span>
+                                                {/* 이미지 Storage 저장 여부 표시 */}
+                                                {item.image && (
+                                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                                        item.image.includes('supabase')
+                                                            ? 'bg-green-50 text-green-600'
+                                                            : 'bg-orange-50 text-orange-500'
+                                                    }`}>
+                                                        {item.image.includes('supabase') ? '✓ 서버 저장' : '⚠ 외부 링크'}
+                                                    </span>
+                                                )}
                                             </div>
                                             <p className="text-sm font-bold text-gray-900 line-clamp-1">{item.name}</p>
                                             <div className="flex items-center gap-3 mt-1">
                                                 <span className="text-sm text-blue-600 font-extrabold italic">₩{item.price.toLocaleString()}</span>
                                                 <div className="flex items-center gap-1 text-[11px] text-gray-400 font-medium">
-                                                    <BarChart2 className="w-3 h-3" />
-                                                    클릭 {item.click_count}회
+                                                    <BarChart2 className="w-3 h-3" /> 클릭 {item.click_count}회
                                                 </div>
+                                                {item.affiliate_link && (
+                                                    <span className="text-[10px] text-blue-400 flex items-center gap-0.5">
+                                                        <Link className="w-3 h-3" /> 링크
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button 
-                                                onClick={() => handleToggleItem(item)} 
-                                                title={item.is_active ? '숨기기' : '표시하기'}
-                                                className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
-                                            >
+                                            <button onClick={() => handleToggleItem(item)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
                                                 {item.is_active ? <ToggleRight className="w-6 h-6 text-blue-500" /> : <ToggleLeft className="w-6 h-6 text-gray-300" />}
                                             </button>
                                             <button onClick={() => openEditItemForm(item)} className="p-2 hover:bg-blue-50 rounded-xl transition-colors">
@@ -542,33 +538,23 @@ export function AdminDashboard() {
                             <div className="bg-white border border-gray-200 rounded-xl px-4 py-2 text-xs text-gray-500 font-medium">
                                 총 <span className="text-blue-600 font-bold">{cities.length}개</span>의 도시가 등록되어 있습니다.
                             </div>
-                            <button
-                                onClick={openCreateCityForm}
-                                className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-100 transition-all active:scale-95"
-                            >
+                            <button onClick={openCreateCityForm}
+                                    className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-100 transition-all active:scale-95">
                                 <Plus className="w-4 h-4" /> 나라/도시 추가
                             </button>
                         </div>
 
                         {citiesLoading ? (
-                            <div className="space-y-2">
-                                {[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}
-                            </div>
+                            <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 {cities.map(city => (
                                     <div key={city.id} className={`bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4 group transition-all hover:border-blue-200 hover:shadow-md ${!city.is_active ? 'opacity-50 grayscale' : ''}`}>
-                                        <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center text-3xl flex-shrink-0 shadow-inner">
-                                            {city.emoji}
-                                        </div>
+                                        <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center text-3xl flex-shrink-0 shadow-inner">{city.emoji}</div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <p className="text-sm font-bold text-gray-900">{city.name}</p>
-                                                {city.is_active ? (
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                                ) : (
-                                                    <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
-                                                )}
+                                                <span className={`w-1.5 h-1.5 rounded-full ${city.is_active ? 'bg-green-500' : 'bg-gray-300'}`} />
                                             </div>
                                             <p className="text-[11px] text-gray-400 mt-0.5 font-medium">
                                                 <span className="bg-gray-100 px-1.5 py-0.5 rounded mr-1">ID: {city.id}</span>
@@ -576,13 +562,13 @@ export function AdminDashboard() {
                                             </p>
                                         </div>
                                         <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button onClick={() => handleToggleCity(city)} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                                            <button onClick={() => handleToggleCity(city)} className="p-2 hover:bg-gray-100 rounded-xl">
                                                 {city.is_active ? <ToggleRight className="w-6 h-6 text-blue-500" /> : <ToggleLeft className="w-6 h-6 text-gray-300" />}
                                             </button>
-                                            <button onClick={() => openEditCityForm(city)} className="p-2 hover:bg-blue-50 rounded-xl transition-colors">
+                                            <button onClick={() => openEditCityForm(city)} className="p-2 hover:bg-blue-50 rounded-xl">
                                                 <Pencil className="w-4 h-4 text-blue-600" />
                                             </button>
-                                            <button onClick={() => handleDeleteCity(city.id)} className="p-2 hover:bg-red-50 rounded-xl transition-colors">
+                                            <button onClick={() => handleDeleteCity(city.id)} className="p-2 hover:bg-red-50 rounded-xl">
                                                 <Trash2 className="w-4 h-4 text-red-500" />
                                             </button>
                                         </div>
@@ -619,14 +605,12 @@ export function AdminDashboard() {
                             <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-sm">
                                 <div className="flex items-center justify-between mb-6">
                                     <h2 className="text-base font-black text-gray-900 flex items-center gap-2">
-                                        <BarChart2 className="w-5 h-5 text-blue-500" />
-                                        클릭 TOP 5 품목
+                                        <BarChart2 className="w-5 h-5 text-blue-500" /> 클릭 TOP 5 품목
                                     </h2>
-                                    <span className="text-[10px] text-gray-400 font-bold uppercase">Rankings</span>
                                 </div>
                                 <div className="space-y-4">
                                     {topItems.map((item, index) => (
-                                        <div key={item.id} className="flex items-center gap-4 p-3 rounded-2xl hover:bg-gray-50 transition-colors">
+                                        <div key={item.id} className="flex items-center gap-4 p-3 rounded-2xl hover:bg-gray-50">
                                             <span className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-black flex-shrink-0 ${
                                                 index === 0 ? 'bg-yellow-400 text-white' :
                                                     index === 1 ? 'bg-gray-200 text-gray-600' :
@@ -634,9 +618,9 @@ export function AdminDashboard() {
                                             }`}>{index + 1}</span>
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-sm font-bold text-gray-900 line-clamp-1">{item.name}</p>
-                                                <p className="text-[11px] text-gray-400 font-medium">{cityLabels[item.city] || item.city} · {CATEGORY_LABELS[item.category]}</p>
+                                                <p className="text-[11px] text-gray-400">{cityLabels[item.city] || item.city} · {CATEGORY_LABELS[item.category]}</p>
                                             </div>
-                                            <p className="text-base font-black text-blue-600 flex-shrink-0">{item.click_count.toLocaleString()}</p>
+                                            <p className="text-base font-black text-blue-600 flex-shrink-0">{item.click_count}</p>
                                         </div>
                                     ))}
                                     {topItems.length === 0 && <p className="text-sm text-gray-400 text-center py-10">데이터가 없습니다.</p>}
@@ -646,10 +630,8 @@ export function AdminDashboard() {
                             <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-sm">
                                 <div className="flex items-center justify-between mb-6">
                                     <h2 className="text-base font-black text-gray-900 flex items-center gap-2">
-                                        <Globe className="w-5 h-5 text-green-500" />
-                                        도시별 클릭 비중
+                                        <Globe className="w-5 h-5 text-green-500" /> 도시별 클릭 비중
                                     </h2>
-                                    <span className="text-[10px] text-gray-400 font-bold uppercase">Distributions</span>
                                 </div>
                                 <div className="space-y-5">
                                     {cities.map(city => {
@@ -662,15 +644,11 @@ export function AdminDashboard() {
                                                     <span className="text-[11px] text-gray-500 font-bold">{cityClicks.toLocaleString()}회 ({pct}%)</span>
                                                 </div>
                                                 <div className="h-3 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
-                                                    <div 
-                                                        className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all duration-1000" 
-                                                        style={{ width: `${pct}%` }} 
-                                                    />
+                                                    <div className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all duration-1000" style={{ width: `${pct}%` }} />
                                                 </div>
                                             </div>
                                         );
                                     })}
-                                    {cities.length === 0 && <p className="text-sm text-gray-400 text-center py-10">데이터가 없습니다.</p>}
                                 </div>
                             </div>
                         </div>
@@ -681,63 +659,44 @@ export function AdminDashboard() {
             {/* 도시 추가/수정 모달 */}
             {showCityForm && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
+                    <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl">
                         <div className="flex items-center justify-between px-6 py-4 border-b">
                             <h2 className="text-lg font-black text-gray-900">{editingCity ? '도시 정보 수정' : '새로운 도시 추가'}</h2>
-                            <button onClick={() => setShowCityForm(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                                <X className="w-5 h-5 text-gray-400" />
-                            </button>
+                            <button onClick={() => setShowCityForm(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5 text-gray-400" /></button>
                         </div>
                         <div className="px-6 py-6 space-y-5">
                             {!editingCity && (
                                 <div>
                                     <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">도시 ID (영문 소문자)</label>
-                                    <input
-                                        value={cityForm.id}
-                                        onChange={e => setCityForm({...cityForm, id: e.target.value})}
-                                        placeholder="예: tokyo, jeju-do"
-                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all"
-                                    />
+                                    <input value={cityForm.id} onChange={e => setCityForm({...cityForm, id: e.target.value})} placeholder="예: tokyo, jeju-do"
+                                           className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500" />
                                 </div>
                             )}
                             <div>
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">도시명 (한글)</label>
-                                <input
-                                    value={cityForm.name}
-                                    onChange={e => setCityForm({...cityForm, name: e.target.value})}
-                                    placeholder="예: 도쿄, 제주도"
-                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all"
-                                />
+                                <input value={cityForm.name} onChange={e => setCityForm({...cityForm, name: e.target.value})} placeholder="예: 도쿄, 제주도"
+                                       className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500" />
                             </div>
                             <div>
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">이모지 국기</label>
-                                <input
-                                    value={cityForm.emoji}
-                                    onChange={e => setCityForm({...cityForm, emoji: e.target.value})}
-                                    placeholder="예: 🇰🇷, 🇯🇵"
-                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xl font-bold focus:ring-2 focus:ring-blue-500 transition-all"
-                                />
+                                <input value={cityForm.emoji} onChange={e => setCityForm({...cityForm, emoji: e.target.value})} placeholder="예: 🇰🇷"
+                                       className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xl font-bold focus:ring-2 focus:ring-blue-500" />
                             </div>
                             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
                                 <div>
-                                    <p className="text-sm font-bold text-gray-900">검색 활성화</p>
-                                    <p className="text-[10px] text-gray-400 font-medium">체크 시 사용자 화면에 노출됩니다</p>
+                                    <p className="text-sm font-bold text-gray-900">활성화</p>
+                                    <p className="text-[10px] text-gray-400">체크 시 사용자 화면에 노출됩니다</p>
                                 </div>
-                                <button
-                                    onClick={() => setCityForm({...cityForm, is_active: !cityForm.is_active})}
-                                    className={`w-12 h-6.5 rounded-full transition-all relative ${cityForm.is_active ? 'bg-blue-600' : 'bg-gray-300'}`}
-                                >
-                                    <span className={`absolute top-0.75 w-5 h-5 bg-white rounded-full shadow-md transition-all ${cityForm.is_active ? 'left-6.25' : 'left-0.75'}`} />
+                                <button onClick={() => setCityForm({...cityForm, is_active: !cityForm.is_active})}
+                                        className={`w-12 h-6 rounded-full transition-all relative ${cityForm.is_active ? 'bg-blue-600' : 'bg-gray-300'}`}>
+                                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all ${cityForm.is_active ? 'left-6' : 'left-0.5'}`} />
                                 </button>
                             </div>
                         </div>
                         <div className="px-6 py-5 border-t flex gap-3">
-                            <button onClick={() => setShowCityForm(false)} className="flex-1 py-3 text-gray-500 text-sm font-bold hover:bg-gray-50 rounded-2xl transition-all">취소</button>
-                            <button 
-                                onClick={handleSaveCity} 
-                                disabled={savingCity} 
-                                className="flex-1 py-3 bg-blue-600 text-white rounded-2xl text-sm font-black shadow-lg shadow-blue-100 hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-95"
-                            >
+                            <button onClick={() => setShowCityForm(false)} className="flex-1 py-3 text-gray-500 text-sm font-bold hover:bg-gray-50 rounded-2xl">취소</button>
+                            <button onClick={handleSaveCity} disabled={savingCity}
+                                    className="flex-1 py-3 bg-blue-600 text-white rounded-2xl text-sm font-black hover:bg-blue-700 disabled:opacity-50 active:scale-95">
                                 {savingCity ? '저장 중...' : editingCity ? '수정 완료' : '도시 추가'}
                             </button>
                         </div>
@@ -748,115 +707,83 @@ export function AdminDashboard() {
             {/* 품목 추가/수정 모달 */}
             {showItemForm && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-                    <div className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl animate-in zoom-in-95 duration-200">
+                    <div className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
                         <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
                             <h2 className="text-lg font-black text-gray-900">{editingItem ? '품목 수정' : '새 품목 등록'}</h2>
-                            <button onClick={() => setShowItemForm(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                                <X className="w-5 h-5 text-gray-400" />
-                            </button>
+                            <button onClick={() => setShowItemForm(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5 text-gray-400" /></button>
                         </div>
                         <div className="px-6 py-6 space-y-6">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1.5">
                                     <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">도시 선택</label>
-                                    <select
-                                        value={itemForm.city}
-                                        onChange={e => setItemForm({...itemForm, city: e.target.value})}
-                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all"
-                                    >
+                                    <select value={itemForm.city} onChange={e => setItemForm({...itemForm, city: e.target.value})}
+                                            className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500">
                                         {cities.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
                                     </select>
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">카테고리</label>
-                                    <select
-                                        value={itemForm.category}
-                                        onChange={e => setItemForm({...itemForm, category: e.target.value})}
-                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all"
-                                    >
+                                    <select value={itemForm.category} onChange={e => setItemForm({...itemForm, category: e.target.value})}
+                                            className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500">
                                         {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
                                     </select>
                                 </div>
                             </div>
-                            
                             <div className="space-y-1.5">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">품목명 *</label>
-                                <input 
-                                    value={itemForm.name} 
-                                    onChange={e => setItemForm({...itemForm, name: e.target.value})}
-                                    placeholder="사용자에게 보여질 상품명을 입력하세요"
-                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all" 
-                                />
+                                <input value={itemForm.name} onChange={e => setItemForm({...itemForm, name: e.target.value})} placeholder="사용자에게 보여질 상품명"
+                                       className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500" />
                             </div>
-                            
                             <div className="space-y-1.5">
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">상세 설명</label>
-                                <textarea 
-                                    value={itemForm.description} 
-                                    onChange={e => setItemForm({...itemForm, description: e.target.value})}
-                                    placeholder="상품에 대한 간략한 특징을 적어주세요"
-                                    rows={2}
-                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 transition-all resize-none" 
-                                />
+                                <textarea value={itemForm.description} onChange={e => setItemForm({...itemForm, description: e.target.value})}
+                                          placeholder="상품에 대한 간략한 특징" rows={2}
+                                          className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 resize-none" />
                             </div>
-
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1.5">
                                     <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">가격 (₩) *</label>
-                                    <input 
-                                        type="number" 
-                                        value={itemForm.price} 
-                                        onChange={e => setItemForm({...itemForm, price: Number(e.target.value)})}
-                                        placeholder="0"
-                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-black focus:ring-2 focus:ring-blue-500 transition-all" 
-                                    />
+                                    <input type="number" value={itemForm.price} onChange={e => setItemForm({...itemForm, price: Number(e.target.value)})} placeholder="0"
+                                           className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-black focus:ring-2 focus:ring-blue-500" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">사용 여부</label>
-                                    <button
-                                        onClick={() => setItemForm({...itemForm, is_active: !itemForm.is_active})}
-                                        className={`w-full h-[46px] rounded-2xl transition-all flex items-center justify-center gap-2 font-bold text-sm ${itemForm.is_active ? 'bg-blue-50 text-blue-600 border-2 border-blue-100' : 'bg-gray-50 text-gray-400 border-2 border-transparent'}`}
-                                    >
+                                    <button onClick={() => setItemForm({...itemForm, is_active: !itemForm.is_active})}
+                                            className={`w-full h-[46px] rounded-2xl transition-all flex items-center justify-center gap-2 font-bold text-sm ${itemForm.is_active ? 'bg-blue-50 text-blue-600 border-2 border-blue-100' : 'bg-gray-50 text-gray-400 border-2 border-transparent'}`}>
                                         {itemForm.is_active ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
                                         {itemForm.is_active ? '활성화됨' : '비활성 상태'}
                                     </button>
                                 </div>
                             </div>
-
                             <div className="space-y-4 pt-2 border-t border-gray-100">
                                 <div className="space-y-1.5">
                                     <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1 flex items-center gap-1.5">
-                                        이미지 URL
+                                        <Image className="w-3.5 h-3.5" /> 이미지 URL
+                                        <span className="text-[10px] text-blue-500 font-medium normal-case">저장 시 자동으로 서버에 복사됩니다</span>
                                     </label>
-                                    <input 
-                                        value={itemForm.image} 
-                                        onChange={e => setItemForm({...itemForm, image: e.target.value})}
-                                        placeholder="https://images.unsplash.com/..."
-                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 transition-all" 
-                                    />
+                                    <input value={itemForm.image} onChange={e => setItemForm({...itemForm, image: e.target.value})}
+                                           placeholder="https://... (네이버, 인스타 등 외부 링크 가능)"
+                                           className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-blue-500" />
+                                    {itemForm.image && itemForm.image.startsWith('http') && (
+                                        <img src={itemForm.image} alt="미리보기" className="w-full h-32 object-cover rounded-xl mt-2 border border-gray-100"
+                                             onError={e => (e.currentTarget.style.display = 'none')} />
+                                    )}
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1 flex items-center gap-1.5">
-                                        <Link className="w-3.5 h-3.5 text-blue-500" /> 
-                                        제휴 수익 링크 (선택)
+                                        <Link className="w-3.5 h-3.5 text-blue-500" /> 제휴 수익 링크 (선택)
                                     </label>
-                                    <input 
-                                        value={itemForm.affiliate_link} 
-                                        onChange={e => setItemForm({...itemForm, affiliate_link: e.target.value})}
-                                        placeholder="클릭 시 이동할 예약 페이지 주소"
-                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-blue-500 transition-all" 
-                                    />
+                                    <input value={itemForm.affiliate_link} onChange={e => setItemForm({...itemForm, affiliate_link: e.target.value})}
+                                           placeholder="클릭 시 이동할 예약 페이지 주소"
+                                           className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-blue-500" />
                                 </div>
                             </div>
                         </div>
                         <div className="px-6 py-5 border-t bg-gray-50 flex gap-3 sticky bottom-0 z-10">
-                            <button onClick={() => setShowItemForm(false)} className="flex-1 py-3 text-gray-500 text-sm font-bold hover:bg-white hover:shadow-sm rounded-2xl transition-all">취소</button>
-                            <button 
-                                onClick={handleSaveItem} 
-                                disabled={savingItem} 
-                                className="flex-1 py-3 bg-blue-600 text-white rounded-2xl text-sm font-black shadow-lg shadow-blue-100 hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-95"
-                            >
-                                {savingItem ? '데이터 저장 중...' : editingItem ? '수정 사항 반영' : '품목 등록 완료'}
+                            <button onClick={() => setShowItemForm(false)} className="flex-1 py-3 text-gray-500 text-sm font-bold hover:bg-white rounded-2xl">취소</button>
+                            <button onClick={handleSaveItem} disabled={savingItem}
+                                    className="flex-1 py-3 bg-blue-600 text-white rounded-2xl text-sm font-black hover:bg-blue-700 disabled:opacity-50 active:scale-95">
+                                {savingItem ? '이미지 저장 중...' : editingItem ? '수정 완료' : '품목 등록'}
                             </button>
                         </div>
                     </div>
