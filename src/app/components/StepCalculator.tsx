@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router";
 import { ImageWithFallback } from "./figma/ImageWithFallback";
-import { ArrowLeft, Check } from "lucide-react";
-import { supabase } from "../../supabase"; //test
+import { ArrowLeft, Check, MapPin } from "lucide-react";
+import { supabase } from "../../supabase";
 
 interface TravelItem {
   id: string;
@@ -15,54 +15,64 @@ interface TravelItem {
   affiliate_link: string | null;
 }
 
-const CITIES = [
-  { id: 'bangkok', name: '방콕', emoji: '🇹🇭' },
-  { id: 'danang', name: '다낭', emoji: '🇻🇳' },
-  { id: 'tokyo', name: '도쿄', emoji: '🇯🇵' },
-];
+interface City {
+  id: string;
+  name: string;
+  emoji: string;
+  is_active: boolean;
+}
 
 const STEPS = [
-  { id: 'accommodation', name: 'Accommodation', icon: '🏨', label: '숙소' },
-  { id: 'transport', name: 'Transport', icon: '🚗', label: '교통' },
-  { id: 'tours', name: 'Tours', icon: '🎫', label: '투어' },
-  { id: 'activities', name: 'Activities', icon: '💆', label: '액티비티' },
+  { id: 'accommodation', name: 'Accommodation', label: '숙소' },
+  { id: 'transport', name: 'Transport', label: '교통' },
+  { id: 'tours', name: 'Tours', label: '투어' },
+  { id: 'activities', name: 'Activities', label: '액티비티' },
 ];
+
+type Phase = 'selectCity' | 'selectItems';
 
 export function StepCalculator() {
   const navigate = useNavigate();
-  const [selectedCity, setSelectedCity] = useState('bangkok');
+  const [phase, setPhase] = useState<Phase>('selectCity');
+  const [cities, setCities] = useState<City[]>([]);
+  const [selectedCity, setSelectedCity] = useState<City | null>(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [allItems, setAllItems] = useState<TravelItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Supabase에서 전체 데이터 한 번만 로드
+  // 도시 로드
+  useEffect(() => {
+    const fetchCities = async () => {
+      const { data } = await supabase
+          .from('cities')
+          .select('*')
+          .eq('is_active', true)
+          .order('created_at', { ascending: true });
+      setCities(data || []);
+    };
+    fetchCities();
+  }, []);
+
+  // 품목 로드
   useEffect(() => {
     const fetchItems = async () => {
       setLoading(true);
-      const { data, error } = await supabase
-          .from('items')
-          .select('*')
-          .eq('is_active', true);
-
-      if (error) {
-        console.error('데이터 로드 실패:', error);
-      } else {
-        setAllItems(data || []);
-      }
+      const { data } = await supabase.from('items').select('*').eq('is_active', true);
+      setAllItems(data || []);
       setLoading(false);
     };
-
     fetchItems();
   }, []);
 
   const currentCategory = STEPS[currentStep].id;
   const currentStepInfo = STEPS[currentStep];
 
-  const handleCityChange = (cityId: string) => {
-    setSelectedCity(cityId);
+  const handleCitySelect = (city: City) => {
+    setSelectedCity(city);
     setSelectedItems(new Set());
     setCurrentStep(0);
+    setPhase('selectItems');
   };
 
   const toggleItem = (itemId: string) => {
@@ -76,25 +86,17 @@ export function StepCalculator() {
   };
 
   const filteredItems = allItems.filter(
-      item => item.city === selectedCity && item.category === currentCategory
+      item => item.city === selectedCity?.id && item.category === currentCategory
   );
 
-  const selectedItemsInCurrentCategory = filteredItems.filter(item =>
-      selectedItems.has(item.id)
-  );
+  const selectedItemsInCurrentCategory = filteredItems.filter(item => selectedItems.has(item.id));
 
   const priceRange = useMemo(() => {
     if (filteredItems.length === 0) return { min: 0, max: 0 };
-
     const itemsToCalculate = selectedItemsInCurrentCategory.length > 0
-        ? selectedItemsInCurrentCategory
-        : filteredItems;
-
+        ? selectedItemsInCurrentCategory : filteredItems;
     const prices = itemsToCalculate.map(item => item.price);
-    return {
-      min: Math.min(...prices),
-      max: Math.max(...prices)
-    };
+    return { min: Math.min(...prices), max: Math.max(...prices) };
   }, [selectedItemsInCurrentCategory, filteredItems]);
 
   const handleNext = () => {
@@ -104,17 +106,19 @@ export function StepCalculator() {
     } else {
       const selectedItemsList = allItems.filter(item => selectedItems.has(item.id));
       const totalPrice = selectedItemsList.reduce((sum, item) => sum + item.price, 0);
-
       localStorage.setItem('selectedItems', JSON.stringify(selectedItemsList));
       localStorage.setItem('totalPrice', totalPrice.toString());
-      localStorage.setItem('selectedCity', selectedCity);
-
+      localStorage.setItem('selectedCity', selectedCity?.id || '');
+      localStorage.setItem('selectedCityName', selectedCity?.name || '');
       navigate('/kakao-preview');
     }
   };
 
   const handleBack = () => {
-    if (currentStep > 0) {
+    if (phase === 'selectItems' && currentStep === 0) {
+      setPhase('selectCity');
+      setSelectedCity(null);
+    } else if (currentStep > 0) {
       setCurrentStep(currentStep - 1);
       window.scrollTo(0, 0);
     } else {
@@ -124,47 +128,92 @@ export function StepCalculator() {
 
   const canProceed = selectedItemsInCurrentCategory.length > 0;
 
-  return (
-      <div className="min-h-screen bg-white pb-28">
-        {/* Header — 모바일 컴팩트 */}
-        <div className="bg-white sticky top-0 z-20 shadow-sm border-b border-gray-100">
-          <div className="max-w-2xl mx-auto px-4 pt-3 pb-2">
-
-            {/* 타이틀 행 */}
-            <div className="flex items-center gap-2 mb-3">
-              <button
-                  onClick={handleBack}
-                  className="p-1.5 hover:bg-gray-100 rounded-full transition-colors"
-              >
+  // ── 나라 선택 화면 ──
+  if (phase === 'selectCity') {
+    return (
+        <div className="min-h-screen bg-white">
+          {/* 헤더 */}
+          <div className="bg-white sticky top-0 z-20 shadow-sm border-b border-gray-100">
+            <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-2">
+              <button onClick={() => navigate('/')} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
                 <ArrowLeft className="w-4 h-4" />
               </button>
-              <div className="flex-1">
-                <h1 className="text-sm font-semibold leading-tight">Travel Budget Calculator</h1>
+              <div>
+                <h1 className="text-sm font-semibold">Travel Budget Calculator</h1>
                 <p className="text-xs text-gray-400">Step-by-step planner</p>
               </div>
             </div>
+          </div>
 
-            {/* 도시 선택 */}
-            <div className="mb-3">
-              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 px-0.5">
-                Choose Destination
-              </p>
-              <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
-                {CITIES.map((city) => (
-                    <button
-                        key={city.id}
-                        onClick={() => handleCityChange(city.id)}
-                        className={`flex items-center gap-1 px-3 py-1.5 rounded-full whitespace-nowrap transition-all border text-xs ${
-                            selectedCity === city.id
-                                ? 'bg-blue-600 border-blue-600 text-white shadow-md'
-                                : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
-                        }`}
-                    >
-                      <span>{city.emoji}</span>
-                      <span className="font-medium">{city.name}</span>
-                    </button>
-                ))}
+          <div className="max-w-2xl mx-auto px-4 py-8">
+            <div className="mb-8 text-center">
+              <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <MapPin className="w-6 h-6 text-blue-600" />
               </div>
+              <h2 className="text-xl font-bold text-gray-900 mb-1">어디로 떠나실 건가요?</h2>
+              <p className="text-sm text-gray-500">여행지를 선택하면 맞춤 견적을 도와드릴게요</p>
+            </div>
+
+            {cities.length === 0 ? (
+                <div className="space-y-3">
+                  {[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}
+                </div>
+            ) : (
+                <div className="space-y-3">
+                  {cities.map(city => (
+                      <button
+                          key={city.id}
+                          onClick={() => handleCitySelect(city)}
+                          className="w-full flex items-center gap-4 p-4 bg-white border border-gray-200 rounded-2xl hover:border-blue-400 hover:shadow-md transition-all text-left group"
+                      >
+                        <span className="text-3xl">{city.emoji}</span>
+                        <div className="flex-1">
+                          <p className="text-base font-semibold text-gray-900">{city.name}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            숙소 · 교통 · 투어 · 액티비티 견적
+                          </p>
+                        </div>
+                        <div className="w-8 h-8 rounded-full bg-gray-100 group-hover:bg-blue-600 flex items-center justify-center transition-colors">
+                          <ArrowLeft className="w-4 h-4 rotate-180 text-gray-400 group-hover:text-white transition-colors" />
+                        </div>
+                      </button>
+                  ))}
+                </div>
+            )}
+
+            {/* 가격 면책 문구 */}
+            <p className="text-center text-[11px] text-gray-400 mt-8 leading-relaxed">
+              * 표시된 금액은 참고용이며, 날짜·시즌·재고에 따라 달라질 수 있습니다.
+            </p>
+          </div>
+        </div>
+    );
+  }
+
+  // ── 품목 선택 화면 ──
+  return (
+      <div className="min-h-screen bg-white pb-28">
+        <div className="bg-white sticky top-0 z-20 shadow-sm border-b border-gray-100">
+          <div className="max-w-2xl mx-auto px-4 pt-3 pb-2">
+
+            {/* 타이틀 */}
+            <div className="flex items-center gap-2 mb-3">
+              <button onClick={handleBack} className="p-1.5 hover:bg-gray-100 rounded-full transition-colors">
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div className="flex-1">
+                <h1 className="text-sm font-semibold leading-tight">
+                  {selectedCity?.emoji} {selectedCity?.name} 여행 견적
+                </h1>
+                <p className="text-xs text-gray-400">Step-by-step planner</p>
+              </div>
+              {/* 나라 변경 버튼 */}
+              <button
+                  onClick={() => { setPhase('selectCity'); setSelectedCity(null); }}
+                  className="text-[10px] text-blue-600 border border-blue-200 px-2 py-1 rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                나라 변경
+              </button>
             </div>
 
             {/* 스텝 바 */}
@@ -172,24 +221,14 @@ export function StepCalculator() {
               {STEPS.map((step, index) => {
                 const isActive = index === currentStep;
                 const isCompleted = index < currentStep;
-
                 return (
                     <div key={step.id} className="flex items-center flex-1">
                       <div className="flex flex-col items-center flex-1">
-                        <div
-                            className={`w-7 h-7 rounded-full flex items-center justify-center text-xs transition-all mb-1 ${
-                                isActive
-                                    ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md scale-110'
-                                    : isCompleted
-                                        ? 'bg-green-500 text-white'
-                                        : 'bg-gray-200 text-gray-400'
-                            }`}
-                        >
-                          {isCompleted ? (
-                              <Check className="w-3.5 h-3.5" />
-                          ) : (
-                              <span>{index + 1}</span>
-                          )}
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs transition-all mb-1 ${
+                            isActive ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md scale-110'
+                                : isCompleted ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'
+                        }`}>
+                          {isCompleted ? <Check className="w-3.5 h-3.5" /> : <span>{index + 1}</span>}
                         </div>
                         <div className={`text-[10px] text-center leading-tight ${
                             isActive ? 'text-blue-600 font-semibold' : isCompleted ? 'text-green-600' : 'text-gray-400'
@@ -197,7 +236,6 @@ export function StepCalculator() {
                           {step.name}
                         </div>
                       </div>
-
                       {index < STEPS.length - 1 && (
                           <div className="flex-shrink-0 w-6 mb-4">
                             <div className={`h-0.5 ${isCompleted ? 'bg-green-500' : 'bg-gray-200'}`} />
@@ -220,7 +258,7 @@ export function StepCalculator() {
               <span className="text-xs text-gray-400">/ {STEPS.length}</span>
             </div>
             <h2 className="text-lg font-semibold text-gray-900 mb-1">
-              Select your {currentStepInfo.name} in {CITIES.find(c => c.id === selectedCity)?.name}
+              Select your {currentStepInfo.name} in {selectedCity?.name}
             </h2>
             <p className="text-sm text-gray-500">
               {currentCategory === 'accommodation' && 'Multiple choices allowed for comparison'}
@@ -230,16 +268,13 @@ export function StepCalculator() {
             </p>
           </div>
 
-          {/* 로딩 스켈레톤 */}
           {loading ? (
               <div className="space-y-3">
-                {[1, 2, 3].map(i => (
-                    <div key={i} className="bg-gray-100 rounded-xl h-24 animate-pulse" />
-                ))}
+                {[1,2,3].map(i => <div key={i} className="bg-gray-100 rounded-xl h-24 animate-pulse" />)}
               </div>
           ) : filteredItems.length === 0 ? (
-              <div className="text-center py-12 text-gray-500">
-                <p>No items available in this category.</p>
+              <div className="text-center py-12 text-gray-400 text-sm">
+                이 카테고리에 등록된 항목이 없습니다.
               </div>
           ) : (
               <div className="space-y-3">
@@ -250,38 +285,22 @@ export function StepCalculator() {
                           key={item.id}
                           onClick={() => toggleItem(item.id)}
                           className={`bg-white rounded-xl overflow-hidden border transition-all cursor-pointer hover:shadow-md ${
-                              isSelected
-                                  ? 'border-blue-500 shadow-sm ring-2 ring-blue-100'
-                                  : 'border-gray-200 hover:border-gray-300'
+                              isSelected ? 'border-blue-500 shadow-sm ring-2 ring-blue-100' : 'border-gray-200 hover:border-gray-300'
                           }`}
                       >
                         <div className="flex items-center gap-3 p-3">
                           <div className="w-16 h-16 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
-                            <ImageWithFallback
-                                src={item.image}
-                                alt={item.name}
-                                className="w-full h-full object-cover"
-                            />
+                            <ImageWithFallback src={item.image} alt={item.name} className="w-full h-full object-cover" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="text-sm font-medium text-gray-900 mb-0.5 line-clamp-1">
-                              {item.name}
-                            </h3>
-                            <p className="text-xs text-gray-500 mb-1.5 line-clamp-1">
-                              {item.description}
-                            </p>
-                            <p className="text-base font-semibold text-blue-600">
-                              ₩{item.price.toLocaleString()}
-                            </p>
+                            <h3 className="text-sm font-medium text-gray-900 mb-0.5 line-clamp-1">{item.name}</h3>
+                            <p className="text-xs text-gray-500 mb-1 line-clamp-1">{item.description}</p>
+                            <p className="text-base font-semibold text-blue-600">₩{item.price.toLocaleString()}</p>
                           </div>
                           <div className="flex-shrink-0">
-                            <div
-                                className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
-                                    isSelected
-                                        ? 'bg-blue-500 border-blue-500'
-                                        : 'bg-white border-gray-300'
-                                }`}
-                            >
+                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
+                                isSelected ? 'bg-blue-500 border-blue-500' : 'bg-white border-gray-300'
+                            }`}>
                               {isSelected && <Check className="w-3 h-3 text-white" />}
                             </div>
                           </div>
@@ -291,24 +310,24 @@ export function StepCalculator() {
                 })}
               </div>
           )}
+
+          {/* 가격 면책 문구 */}
+          <p className="text-[11px] text-gray-400 text-center mt-6 leading-relaxed">
+            * 표시된 금액은 참고용이며, 날짜·시즌·재고에 따라<br />실제 가격이 달라질 수 있습니다.
+          </p>
         </div>
 
-        {/* 하단 고정 푸터 */}
+        {/* 하단 푸터 */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-10">
           <div className="max-w-2xl mx-auto px-4 py-3">
             <div className="flex items-center justify-center gap-2 mb-2">
               <p className="text-xs text-gray-400">Estimated Budget</p>
               <p className="text-sm font-semibold text-gray-800">
-                {selectedItemsInCurrentCategory.length > 0 ? (
-                    priceRange.min === priceRange.max
-                        ? `₩${priceRange.min.toLocaleString()}`
-                        : `₩${priceRange.min.toLocaleString()} ~ ₩${priceRange.max.toLocaleString()}`
-                ) : (
-                    `₩${priceRange.min.toLocaleString()} ~ ₩${priceRange.max.toLocaleString()}`
-                )}
+                {priceRange.min === priceRange.max
+                    ? `₩${priceRange.min.toLocaleString()}`
+                    : `₩${priceRange.min.toLocaleString()} ~ ₩${priceRange.max.toLocaleString()}`}
               </p>
             </div>
-
             <button
                 onClick={handleNext}
                 disabled={!canProceed}
@@ -318,15 +337,10 @@ export function StepCalculator() {
                         : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 active:scale-[0.99] shadow-md'
                 }`}
             >
-              {currentStep < STEPS.length - 1
-                  ? `Next Step: ${STEPS[currentStep + 1].name}`
-                  : 'Complete & View Summary'}
+              {currentStep < STEPS.length - 1 ? `Next Step: ${STEPS[currentStep + 1].name}` : 'Complete & View Summary'}
             </button>
-
             {!canProceed && (
-                <p className="text-xs text-center text-gray-400 mt-1">
-                  Please select at least one item to continue
-                </p>
+                <p className="text-xs text-center text-gray-400 mt-1">Please select at least one item to continue</p>
             )}
           </div>
         </div>

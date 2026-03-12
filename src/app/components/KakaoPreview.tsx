@@ -20,48 +20,38 @@ interface TravelItem {
   affiliate_link: string | null;
 }
 
-const CITY_LABELS: Record<string, string> = {
-  bangkok: '방콕',
-  danang: '다낭',
-  tokyo: '도쿄',
-};
-
 export function KakaoPreview() {
   const navigate = useNavigate();
   const [selectedItems, setSelectedItems] = useState<TravelItem[]>([]);
   const [totalPrice, setTotalPrice] = useState(0);
-  const [selectedCity, setSelectedCity] = useState('bangkok');
+  const [selectedCityName, setSelectedCityName] = useState('');
+  const [selectedCity, setSelectedCity] = useState('');
   const [sharing, setSharing] = useState(false);
 
-  // localStorage에서 선택된 항목 불러오기
   useEffect(() => {
     const items = localStorage.getItem('selectedItems');
     const price = localStorage.getItem('totalPrice');
     const city = localStorage.getItem('selectedCity');
+    const cityName = localStorage.getItem('selectedCityName');
 
     if (items) setSelectedItems(JSON.parse(items));
     if (price) setTotalPrice(parseInt(price));
     if (city) setSelectedCity(city);
+    if (cityName) setSelectedCityName(cityName);
   }, []);
 
   // 카카오 SDK 초기화
   useEffect(() => {
     const kakaoKey = import.meta.env.VITE_KAKAO_JS_KEY;
-
     const initKakao = () => {
       if (window.Kakao && !window.Kakao.isInitialized()) {
         window.Kakao.init(kakaoKey);
       }
     };
-
-    // 이미 로드됐으면 바로 초기화
     if (window.Kakao) {
       initKakao();
     } else {
-      // 로드 안 됐으면 스크립트 로드 완료 후 초기화
-      const script = document.querySelector(
-          'script[src*="kakao_js_sdk"]'
-      ) as HTMLScriptElement;
+      const script = document.querySelector('script[src*="kakao_js_sdk"]') as HTMLScriptElement;
       if (script) {
         script.addEventListener('load', initKakao);
         return () => script.removeEventListener('load', initKakao);
@@ -69,24 +59,20 @@ export function KakaoPreview() {
     }
   }, []);
 
-  // 제휴링크 클릭 — Supabase에 통계 기록 후 링크 이동
+  // 제휴링크 클릭 — Supabase 통계 기록
   const handleAffiliateClick = async (item: TravelItem) => {
-    // 클릭 통계 기록
     await supabase.from('clicks').insert({
       item_id: item.id,
       session_id: sessionStorage.getItem('session_id') || crypto.randomUUID(),
     });
-
-    // click_count 증가
     await supabase.rpc('increment_click_count', { item_id: item.id });
 
-    // 제휴링크로 이동
     if (item.affiliate_link) {
       window.open(item.affiliate_link, '_blank');
     }
   };
 
-  // 카카오톡 공유
+  // 카카오톡 공유 — 각 품목 링크를 제휴링크로 연결
   const handleKakaoShare = () => {
     if (!window.Kakao?.isInitialized()) {
       alert('카카오 SDK가 로드되지 않았습니다. 잠시 후 다시 시도해주세요.');
@@ -94,33 +80,33 @@ export function KakaoPreview() {
     }
 
     setSharing(true);
-
-    const cityLabel = CITY_LABELS[selectedCity] || selectedCity;
     const topItems = selectedItems.slice(0, 3);
+    const baseUrl = window.location.origin;
 
     try {
       window.Kakao.Share.sendDefault({
         objectType: 'list',
-        headerTitle: `✈️ ${cityLabel} 여행 견적서`,
+        headerTitle: `✈️ ${selectedCityName} 여행 견적서`,
         headerLink: {
-          mobileWebUrl: window.location.href,
-          webUrl: window.location.href,
+          mobileWebUrl: `${baseUrl}/kakao-preview`,
+          webUrl: `${baseUrl}/kakao-preview`,
         },
         contents: topItems.map(item => ({
           title: item.name,
-          description: `${item.description} · ₩${item.price.toLocaleString()}`,
+          description: `${item.description} · ₩${item.price.toLocaleString()} (참고가)`,
           imageUrl: item.image,
           link: {
-            mobileWebUrl: item.affiliate_link || window.location.href,
-            webUrl: item.affiliate_link || window.location.href,
+            // 제휴링크가 있으면 제휴링크로, 없으면 메인 페이지로
+            mobileWebUrl: item.affiliate_link || `${baseUrl}/step-calculator`,
+            webUrl: item.affiliate_link || `${baseUrl}/step-calculator`,
           },
         })),
         buttons: [
           {
-            title: '전체 견적 확인하기',
+            title: '나도 견적 받기',
             link: {
-              mobileWebUrl: window.location.href,
-              webUrl: window.location.href,
+              mobileWebUrl: `${baseUrl}/step-calculator`,
+              webUrl: `${baseUrl}/step-calculator`,
             },
           },
         ],
@@ -139,7 +125,7 @@ export function KakaoPreview() {
           <div className="bg-white rounded-xl p-6 text-center max-w-md">
             <p className="text-gray-600 mb-4">선택된 항목이 없습니다.</p>
             <button
-                onClick={() => navigate('/calculator')}
+                onClick={() => navigate('/step-calculator')}
                 className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
             >
               견적 계산기로 돌아가기
@@ -149,17 +135,12 @@ export function KakaoPreview() {
     );
   }
 
-  const cityLabel = CITY_LABELS[selectedCity] || selectedCity;
-
   return (
       <div className="min-h-screen bg-gray-100">
-        {/* Header */}
+        {/* 헤더 */}
         <div className="bg-white sticky top-0 z-10 shadow-sm">
           <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-            <button
-                onClick={() => navigate('/calculator')}
-                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
-            >
+            <button onClick={() => navigate('/step-calculator')} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div>
@@ -180,19 +161,17 @@ export function KakaoPreview() {
                 </svg>
               </div>
               <div className="flex-1 text-white">
-                <h2 className="text-sm font-semibold">{cityLabel} 여행 견적 봇</h2>
+                <h2 className="text-sm font-semibold">{selectedCityName} 여행 견적 봇</h2>
                 <p className="text-xs opacity-90">맞춤 여행 플래너</p>
               </div>
             </div>
 
-            {/* 채팅 메시지 영역 */}
+            {/* 채팅 메시지 */}
             <div className="bg-[#FEE500] p-4">
-              {/* 인사 메시지 */}
               <div className="mb-3">
                 <div className="bg-white rounded-2xl rounded-tl-sm p-3 inline-block max-w-[85%] shadow-md">
                   <p className="text-sm text-gray-800">
-                    안녕하세요! 😊<br />
-                    선택하신 여행 견적서를 보내드립니다.
+                    안녕하세요! 😊<br />선택하신 여행 견적서를 보내드립니다.
                   </p>
                 </div>
               </div>
@@ -200,53 +179,51 @@ export function KakaoPreview() {
               {/* 견적 카드 */}
               <div className="mb-3">
                 <div className="bg-white rounded-2xl rounded-tl-sm overflow-hidden shadow-xl max-w-[95%]">
-                  {/* 헤더 */}
                   <div className="px-4 py-3 border-b border-gray-100">
                     <h3 className="text-base font-semibold text-gray-900 mb-1">
-                      ✈️ Your {cityLabel} Itinerary
+                      ✈️ Your {selectedCityName} Itinerary
                     </h3>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500">총 예상 비용</span>
-                      <span className="text-lg font-bold text-orange-600">
-                      ₩{totalPrice.toLocaleString()}
-                    </span>
+                      <span className="text-lg font-bold text-orange-600">₩{totalPrice.toLocaleString()}</span>
                     </div>
+                    {/* 가격 면책 문구 */}
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      * 날짜·시즌에 따라 실제 가격이 달라질 수 있습니다
+                    </p>
                   </div>
 
-                  {/* 품목 리스트 — 제휴링크 클릭 가능 */}
+                  {/* 품목 리스트 — 클릭 시 제휴링크 이동 */}
                   <div className="divide-y divide-gray-100">
                     {selectedItems.slice(0, 3).map((item) => (
                         <div
                             key={item.id}
                             onClick={() => handleAffiliateClick(item)}
-                            className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors cursor-pointer active:bg-gray-100"
+                            className={`flex items-center gap-3 px-4 py-3 transition-colors active:bg-gray-100 ${
+                                item.affiliate_link ? 'cursor-pointer hover:bg-gray-50' : 'cursor-default'
+                            }`}
                         >
                           <div className="flex-1 min-w-0">
-                            <h4 className="text-sm font-medium text-gray-900 mb-0.5 line-clamp-1">
-                              {item.name}
-                            </h4>
-                            <p className="text-xs text-gray-500 mb-1 line-clamp-1">
-                              {item.description}
-                            </p>
-                            <p className="text-sm font-semibold text-blue-600">
-                              ₩{item.price.toLocaleString()}
-                            </p>
+                            <h4 className="text-sm font-medium text-gray-900 mb-0.5 line-clamp-1">{item.name}</h4>
+                            <p className="text-xs text-gray-500 mb-1 line-clamp-1">{item.description}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-blue-600">₩{item.price.toLocaleString()}</p>
+                              {item.affiliate_link && (
+                                  <span className="text-[10px] text-blue-400 flex items-center gap-0.5">
+                              <ExternalLink className="w-2.5 h-2.5" /> 예약하기
+                            </span>
+                              )}
+                            </div>
                           </div>
                           <div className="w-14 h-14 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
-                            <ImageWithFallback
-                                src={item.image}
-                                alt={item.name}
-                                className="w-full h-full object-cover"
-                            />
+                            <ImageWithFallback src={item.image} alt={item.name} className="w-full h-full object-cover" />
                           </div>
                         </div>
                     ))}
 
                     {selectedItems.length > 3 && (
                         <div className="px-4 py-2 bg-gray-50 text-center">
-                          <p className="text-xs text-gray-500">
-                            + {selectedItems.length - 3}개 항목 더보기
-                          </p>
+                          <p className="text-xs text-gray-500">+ {selectedItems.length - 3}개 항목 더보기</p>
                         </div>
                     )}
                   </div>
@@ -264,12 +241,10 @@ export function KakaoPreview() {
                 </div>
               </div>
 
-              {/* 안내 메시지 */}
               <div className="mb-3">
                 <div className="bg-white rounded-2xl rounded-tl-sm p-3 inline-block max-w-[85%] shadow-md">
                   <p className="text-sm text-gray-800">
-                    위 버튼을 눌러<br />
-                    전체 일정과 예약 링크를 확인하세요! ✨
+                    위 항목을 클릭하면<br />예약 페이지로 바로 이동해요! ✨
                   </p>
                 </div>
               </div>
@@ -277,8 +252,7 @@ export function KakaoPreview() {
               <div>
                 <div className="bg-white rounded-2xl rounded-tl-sm p-3 inline-block max-w-[85%] shadow-md">
                   <p className="text-sm text-gray-800">
-                    궁금한 점이 있으시면<br />
-                    언제든 문의해주세요! 😊
+                    궁금한 점이 있으시면<br />언제든 문의해주세요! 😊
                   </p>
                 </div>
               </div>
@@ -287,13 +261,16 @@ export function KakaoPreview() {
 
           {/* 하단 버튼 */}
           <div className="bg-white rounded-b-3xl shadow-xl px-5 py-4">
-            <p className="text-xs text-gray-500 text-center mb-3">
+            <p className="text-xs text-gray-500 text-center mb-1">
               실제 카카오톡으로 이와 같은 형태의{' '}
               <span className="text-orange-600 font-medium">맞춤 견적서</span>가 전송됩니다.
             </p>
+            <p className="text-[10px] text-gray-400 text-center mb-3">
+              * 공유된 메시지의 각 항목 클릭 시 예약 페이지로 바로 이동됩니다
+            </p>
             <div className="flex gap-2">
               <button
-                  onClick={() => navigate('/calculator')}
+                  onClick={() => navigate('/step-calculator')}
                   className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors text-sm font-medium"
               >
                 다시 계산하기
