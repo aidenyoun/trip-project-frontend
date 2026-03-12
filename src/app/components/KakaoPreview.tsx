@@ -47,9 +47,24 @@ export function KakaoPreview() {
   // 카카오 SDK 초기화
   useEffect(() => {
     const kakaoKey = import.meta.env.VITE_KAKAO_JS_KEY;
-    if (window.Kakao && kakaoKey) {
-      if (!window.Kakao.isInitialized()) {
+
+    const initKakao = () => {
+      if (window.Kakao && !window.Kakao.isInitialized()) {
         window.Kakao.init(kakaoKey);
+      }
+    };
+
+    // 이미 로드됐으면 바로 초기화
+    if (window.Kakao) {
+      initKakao();
+    } else {
+      // 로드 안 됐으면 스크립트 로드 완료 후 초기화
+      const script = document.querySelector(
+          'script[src*="kakao_js_sdk"]'
+      ) as HTMLScriptElement;
+      if (script) {
+        script.addEventListener('load', initKakao);
+        return () => script.removeEventListener('load', initKakao);
       }
     }
   }, []);
