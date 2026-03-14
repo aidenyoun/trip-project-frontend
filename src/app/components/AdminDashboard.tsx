@@ -1,59 +1,48 @@
-import React, { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router";
 import { supabase } from "../../supabase";
 import * as XLSX from 'xlsx';
 import {
     LogOut, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
     BarChart2, Package, Link, X, Check, Globe, FileUp, Download,
-    Info, AlertCircle, Image, Loader2, RefreshCw
+    Info, AlertCircle, Image, Loader2, RefreshCw, Layers, CalendarDays
 } from "lucide-react";
 
 interface TravelItem {
-    id: string;
-    city: string;
-    category: string;
-    name: string;
-    description: string;
-    price: number;
-    image: string;
-    affiliate_link: string | null;
-    click_count: number;
-    is_active: boolean;
-    created_at: string;
+    id: string; city: string; category: string; name: string;
+    description: string; price: number; image: string;
+    affiliate_link: string | null; click_count: number;
+    is_active: boolean; created_at: string; group_id: string | null;
+}
+
+interface ItemGroup {
+    id: string; city: string; category: string; name: string;
+    description: string; image: string; is_active: boolean; created_at: string;
 }
 
 interface City {
-    id: string;
-    name: string;
-    emoji: string;
-    country_code: string;
-    is_active: boolean;
-    created_at: string;
+    id: string; name: string; emoji: string; country_code: string;
+    is_active: boolean; created_at: string;
 }
 
-interface Country {
-    code: string;
-    name: string;
-    emoji: string;
-}
+interface Country { code: string; name: string; emoji: string; }
 
 const CATEGORIES = ['accommodation', 'transport', 'tours', 'activities'];
 const CATEGORY_LABELS: Record<string, string> = {
     accommodation: '숙소', transport: '교통', tours: '투어', activities: '액티비티'
 };
-
-const EXCEL_HEADER_MAP: Record<string, string> = {
-    '도시 ID': 'city', '카테고리': 'category', '품목명': 'name', '설명': 'description',
-    '가격': 'price', '이미지 URL': 'image', '제휴 링크': 'affiliate_link', '활성화(Y/N)': 'is_active'
-};
+const MONTHS = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
 
 const EMPTY_ITEM_FORM = {
-    id: '', city: '', category: 'accommodation',
-    name: '', description: '', price: 0, image: '', affiliate_link: '', is_active: true
+    id: '', city: '', category: 'accommodation', name: '',
+    description: '', price: 0, image: '', affiliate_link: '', is_active: true, group_id: ''
+};
+const EMPTY_GROUP_FORM = {
+    id: '', city: '', category: 'tours', name: '', description: '', image: '', is_active: true
 };
 const EMPTY_CITY_FORM = { id: '', name: '', emoji: '🌏', country_code: '', is_active: true };
 
-type Tab = 'items' | 'cities' | 'stats';
+type Tab = 'items' | 'groups' | 'cities' | 'stats';
 
 const BUCKET = 'item-images';
 
@@ -81,6 +70,8 @@ export function AdminDashboard() {
     const [showItemForm, setShowItemForm] = useState(false);
     const [editingItem, setEditingItem] = useState<TravelItem | null>(null);
     const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM);
+    // 월별 가격: month(1~12) → price (0이면 미설정)
+    const [monthlyPrices, setMonthlyPrices] = useState<Record<number, number>>({});
     const [savingItem, setSavingItem] = useState(false);
     const [filterCity, setFilterCity] = useState('all');
     const [filterCategory, setFilterCategory] = useState('all');
@@ -88,6 +79,13 @@ export function AdminDashboard() {
     const [isBulkUploading, setIsBulkUploading] = useState(false);
     const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number; label?: string } | null>(null);
     const [showExcelHelp, setShowExcelHelp] = useState(false);
+
+    const [groups, setGroups] = useState<ItemGroup[]>([]);
+    const [groupsLoading, setGroupsLoading] = useState(true);
+    const [showGroupForm, setShowGroupForm] = useState(false);
+    const [editingGroup, setEditingGroup] = useState<ItemGroup | null>(null);
+    const [groupForm, setGroupForm] = useState(EMPTY_GROUP_FORM);
+    const [savingGroup, setSavingGroup] = useState(false);
 
     const [cities, setCities] = useState<City[]>([]);
     const [citiesLoading, setCitiesLoading] = useState(true);
@@ -97,16 +95,9 @@ export function AdminDashboard() {
     const [savingCity, setSavingCity] = useState(false);
     const [countries, setCountries] = useState<Country[]>([]);
 
-    // ✅ 번역 관련 state (컴포넌트 내부로 이동)
-    const [translationStats, setTranslationStats] = useState({
-        total: 0, translated_en: 0, translated_ja: 0
-    });
+    const [translationStats, setTranslationStats] = useState({ total: 0, translated_en: 0, translated_ja: 0 });
     const [translating, setTranslating] = useState(false);
-    const [translateProgress, setTranslateProgress] = useState<{
-        current: number;
-        total: number;
-        startTime: number;
-    } | null>(null);
+    const [translateProgress, setTranslateProgress] = useState<{ current: number; total: number; startTime: number } | null>(null);
 
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
@@ -116,9 +107,11 @@ export function AdminDashboard() {
 
     const fetchCities = async () => {
         setCitiesLoading(true);
-        const { data } = await supabase.from('cities').select('*').order('created_at', { ascending: true });
-        setCities(data || []);
+        const { data: cityData } = await supabase.from('cities').select('*').order('created_at', { ascending: true });
+        setCities(cityData || []);
         setCitiesLoading(false);
+        const { data: countryData } = await supabase.from('countries').select('*').order('name');
+        setCountries(countryData || []);
     };
 
     const fetchItems = async () => {
@@ -128,155 +121,119 @@ export function AdminDashboard() {
         setItemsLoading(false);
     };
 
-    useEffect(() => {
-        supabase.from('countries').select('*').order('name').then(({ data }) => {
-            setCountries(data || []);
-        });
-    }, []);
-
-    useEffect(() => { fetchCities(); fetchItems(); }, []);
-    useEffect(() => { fetchItems(); }, [sortBy]);
-
-    // ✅ 번역 현황 fetch (컴포넌트 내부로 이동)
-    useEffect(() => {
-        const fetchStats = async () => {
-            const { count: total } = await supabase
-                .from("items").select("*", { count: "exact", head: true });
-            const { count: en } = await supabase
-                .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "en");
-            const { count: ja } = await supabase
-                .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "ja");
-
-            setTranslationStats({
-                total: total || 0,
-                translated_en: en || 0,
-                translated_ja: ja || 0,
-            });
-        };
-        fetchStats();
-    }, []);
-
-    const handleLogout = async () => {
-        await supabase.auth.signOut();
-        navigate('/admin');
+    const fetchGroups = async () => {
+        setGroupsLoading(true);
+        const { data } = await supabase.from('item_groups').select('*').order('created_at', { ascending: false });
+        setGroups(data || []);
+        setGroupsLoading(false);
     };
 
-    // ✅ 일괄 번역 handler - 1개씩 순차 호출 + 진행률 표시
+    useEffect(() => { fetchCities(); fetchItems(); fetchGroups(); }, []);
+    useEffect(() => { fetchItems(); }, [sortBy]);
+
+    // 번역 통계
+    useEffect(() => {
+        const fetchStats = async () => {
+            const { count: total } = await supabase.from('items').select('*', { count: 'exact', head: true });
+            const { count: en } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'en');
+            const { count: ja } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'ja');
+            setTranslationStats({ total: total || 0, translated_en: en || 0, translated_ja: ja || 0 });
+        };
+        fetchStats();
+    }, [items]);
+
+    const handleLogout = async () => { await supabase.auth.signOut(); navigate('/admin'); };
+
+    // ── 일괄 번역 ──
     const handleBatchTranslate = async () => {
-        setTranslating(true);
-        setTranslateProgress(null);
         try {
-            // 미번역 아이템 목록 조회
-            const { data: allItems } = await supabase
-                .from("items").select("id").eq("is_active", true);
-            const { data: translated } = await supabase
-                .from("item_translations").select("item_id, lang");
-
-            const translatedMap = new Set(
-                translated?.map(t => `${t.item_id}_${t.lang}`) || []
-            );
-            const untranslatedIds = (allItems || [])
-                .filter(item =>
-                    !translatedMap.has(`${item.id}_en`) ||
-                    !translatedMap.has(`${item.id}_ja`)
-                )
-                .map(item => item.id);
-
-            if (untranslatedIds.length === 0) {
-                alert("번역할 항목이 없습니다.");
-                return;
-            }
-
+            setTranslating(true);
+            const { data: allItems } = await supabase.from('items').select('id');
+            const { data: translated } = await supabase.from('item_translations').select('item_id, lang');
+            const translatedMap = new Set(translated?.map(t => `${t.item_id}_${t.lang}`) || []);
+            const untranslatedIds = (allItems || []).filter(item =>
+                !translatedMap.has(`${item.id}_en`) || !translatedMap.has(`${item.id}_ja`)
+            ).map(i => i.id);
+            if (untranslatedIds.length === 0) { alert('번역할 항목이 없습니다.'); return; }
             const { data: { session } } = await supabase.auth.getSession();
             const total = untranslatedIds.length;
             const startTime = Date.now();
-            setTranslateProgress({ current: 0, total, startTime });
-
-            // 5개씩 병렬 처리
             const CHUNK_SIZE = 5;
             for (let i = 0; i < untranslatedIds.length; i += CHUNK_SIZE) {
                 const chunk = untranslatedIds.slice(i, i + CHUNK_SIZE);
-
-                await Promise.all(chunk.map(item_id =>
-                    fetch(
-                        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`,
-                        {
-                            method: "POST",
-                            headers: {
-                                "Content-Type": "application/json",
-                                "Authorization": `Bearer ${session?.access_token}`,
-                            },
-                            body: JSON.stringify({ item_id }),
-                        }
-                    )
-                ));
-
-                setTranslateProgress({
-                    current: Math.min(i + CHUNK_SIZE, total),
-                    total,
-                    startTime,
+                setTranslateProgress({ current: Math.min(i + CHUNK_SIZE, total), total, startTime });
+                await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+                    body: JSON.stringify({ item_ids: chunk }),
                 });
             }
-
-            // 완료 후 stats 갱신
-            const { count: en } = await supabase
-                .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "en");
-            const { count: ja } = await supabase
-                .from("item_translations").select("*", { count: "exact", head: true }).eq("lang", "ja");
+            const { count: en } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'en');
+            const { count: ja } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'ja');
             setTranslationStats(prev => ({ ...prev, translated_en: en || 0, translated_ja: ja || 0 }));
-
             alert(`✅ 번역 완료: ${total}개 항목`);
-        } catch (e) {
-            alert("번역 중 오류 발생");
-        } finally {
-            setTranslating(false);
-            setTranslateProgress(null);
-        }
+        } catch { alert('번역 중 오류 발생'); }
+        finally { setTranslating(false); setTranslateProgress(null); }
     };
 
-    // ── 기존 외부 링크 이미지 일괄 마이그레이션 ──
+    // ── 이미지 일괄 이전 ──
     const handleMigrateImages = async () => {
-        const externalItems = items.filter(
-            item => item.image && item.image.startsWith('http') && !item.image.includes('supabase')
-        );
-
-        if (externalItems.length === 0) {
-            alert('✅ 모든 이미지가 이미 서버에 저장되어 있습니다!');
-            return;
-        }
-
-        if (!confirm(`외부 링크 이미지 ${externalItems.length}개를 서버로 이전합니다.\n시간이 다소 걸릴 수 있습니다. 계속할까요?`)) return;
-
+        const externalItems = items.filter(i => i.image && i.image.startsWith('http') && !i.image.includes('supabase'));
+        if (externalItems.length === 0) { alert('✅ 모든 이미지가 이미 서버에 저장되어 있습니다!'); return; }
+        if (!confirm(`외부 링크 이미지 ${externalItems.length}개를 서버로 이전합니다. 계속할까요?`)) return;
         setIsBulkUploading(true);
-        let successCount = 0;
-        let failCount = 0;
-
+        let successCount = 0, failCount = 0;
         for (let i = 0; i < externalItems.length; i++) {
             const item = externalItems[i];
             setBulkProgress({ current: i + 1, total: externalItems.length, label: item.name });
-
             const newUrl = await uploadImageToStorage(item.image, item.id);
-
             if (newUrl !== item.image) {
                 const { error } = await supabase.from('items').update({ image: newUrl }).eq('id', item.id);
-                if (error) { failCount++; } else { successCount++; }
-            } else {
-                failCount++;
-            }
+                error ? failCount++ : successCount++;
+            } else failCount++;
         }
-
-        setIsBulkUploading(false);
-        setBulkProgress(null);
+        setIsBulkUploading(false); setBulkProgress(null);
         await fetchItems();
+        alert(`이미지 이전 완료!\n✅ 성공: ${successCount}개\n❌ 실패: ${failCount}개`);
+    };
 
-        alert(`이미지 이전 완료!\n✅ 성공: ${successCount}개\n❌ 실패(원본 유지): ${failCount}개`);
+    // ── 그룹 관리 ──
+    const openCreateGroupForm = () => {
+        setEditingGroup(null);
+        setGroupForm({ ...EMPTY_GROUP_FORM, city: cities[0]?.id || '' });
+        setShowGroupForm(true);
+    };
+    const openEditGroupForm = (g: ItemGroup) => {
+        setEditingGroup(g);
+        setGroupForm({ id: g.id, city: g.city, category: g.category, name: g.name, description: g.description, image: g.image, is_active: g.is_active });
+        setShowGroupForm(true);
+    };
+    const handleSaveGroup = async () => {
+        if (!groupForm.name || !groupForm.id) return alert('ID와 이름은 필수입니다.');
+        setSavingGroup(true);
+        if (editingGroup) {
+            await supabase.from('item_groups').update({ name: groupForm.name, description: groupForm.description, image: groupForm.image, city: groupForm.city, category: groupForm.category, is_active: groupForm.is_active }).eq('id', editingGroup.id);
+        } else {
+            await supabase.from('item_groups').insert({ id: groupForm.id.toLowerCase().replace(/\s+/g, '-'), city: groupForm.city, category: groupForm.category, name: groupForm.name, description: groupForm.description, image: groupForm.image, is_active: groupForm.is_active });
+        }
+        setSavingGroup(false); setShowGroupForm(false); fetchGroups();
+    };
+    const handleDeleteGroup = async (id: string) => {
+        if (!confirm(`그룹 삭제 시 소속 품목들의 그룹 연결이 해제됩니다.`)) return;
+        await supabase.from('items').update({ group_id: null }).eq('group_id', id);
+        await supabase.from('item_groups').delete().eq('id', id);
+        fetchGroups(); fetchItems();
+    };
+    const handleToggleGroup = async (g: ItemGroup) => {
+        await supabase.from('item_groups').update({ is_active: !g.is_active }).eq('id', g.id);
+        fetchGroups();
     };
 
     // ── 도시 관리 ──
     const openCreateCityForm = () => { setEditingCity(null); setCityForm(EMPTY_CITY_FORM); setShowCityForm(true); };
     const openEditCityForm = (city: City) => {
         setEditingCity(city);
-        setCityForm({ id: city.id, name: city.name, emoji: city.emoji, country_code: city.country_code || '', is_active: city.is_active });
+        setCityForm({ id: city.id, name: city.name, emoji: city.emoji, country_code: city.country_code, is_active: city.is_active });
         setShowCityForm(true);
     };
     const handleSaveCity = async () => {
@@ -292,8 +249,9 @@ export function AdminDashboard() {
     const handleDeleteCity = async (id: string) => {
         if (!confirm(`'${id}' 도시를 삭제하면 관련 품목도 모두 삭제됩니다.`)) return;
         await supabase.from('items').delete().eq('city', id);
+        await supabase.from('item_groups').delete().eq('city', id);
         await supabase.from('cities').delete().eq('id', id);
-        fetchCities(); fetchItems();
+        fetchCities(); fetchItems(); fetchGroups();
     };
     const handleToggleCity = async (city: City) => {
         await supabase.from('cities').update({ is_active: !city.is_active }).eq('id', city.id);
@@ -304,13 +262,20 @@ export function AdminDashboard() {
     const openCreateItemForm = () => {
         setEditingItem(null);
         setItemForm({ ...EMPTY_ITEM_FORM, city: cities[0]?.id || '' });
+        setMonthlyPrices({});
         setShowItemForm(true);
     };
-    const openEditItemForm = (item: TravelItem) => {
+    const openEditItemForm = async (item: TravelItem) => {
         setEditingItem(item);
-        setItemForm({ id: item.id, city: item.city, category: item.category, name: item.name, description: item.description, price: item.price, image: item.image, affiliate_link: item.affiliate_link || '', is_active: item.is_active });
+        setItemForm({ id: item.id, city: item.city, category: item.category, name: item.name, description: item.description, price: item.price, image: item.image, affiliate_link: item.affiliate_link || '', is_active: item.is_active, group_id: item.group_id || '' });
+        // 월별 가격 로드
+        const { data: mp } = await supabase.from('item_monthly_prices').select('month, price').eq('item_id', item.id);
+        const mpMap: Record<number, number> = {};
+        (mp || []).forEach(r => { mpMap[r.month] = r.price; });
+        setMonthlyPrices(mpMap);
         setShowItemForm(true);
     };
+
     const handleSaveItem = async () => {
         if (!itemForm.name || !itemForm.price) return alert('이름과 가격은 필수입니다.');
         setSavingItem(true);
@@ -319,30 +284,45 @@ export function AdminDashboard() {
         if (itemForm.image && itemForm.image.startsWith('http') && !itemForm.image.includes('supabase')) {
             finalImageUrl = await uploadImageToStorage(itemForm.image, itemId);
         }
-        const payload = { city: itemForm.city, category: itemForm.category, name: itemForm.name, description: itemForm.description, price: Number(itemForm.price), image: finalImageUrl, affiliate_link: itemForm.affiliate_link || null, is_active: itemForm.is_active };
-        if (editingItem) { await supabase.from('items').update(payload).eq('id', editingItem.id); }
-        else {
+        const payload = {
+            city: itemForm.city, category: itemForm.category, name: itemForm.name,
+            description: itemForm.description, price: Number(itemForm.price),
+            image: finalImageUrl, affiliate_link: itemForm.affiliate_link || null,
+            is_active: itemForm.is_active,
+            group_id: itemForm.group_id || null,
+        };
+        if (editingItem) {
+            await supabase.from('items').update(payload).eq('id', editingItem.id);
+        } else {
             const { data: newItem } = await supabase.from('items').insert({ id: itemId, ...payload }).select().single();
-            // ✅ 새 아이템 등록 시 자동 번역 트리거 (백그라운드)
             if (newItem) {
                 const { data: { session } } = await supabase.auth.getSession();
-                fetch(
-                    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`,
-                    {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Authorization": `Bearer ${session?.access_token}`,
-                        },
-                        body: JSON.stringify({ item_id: newItem.id }),
-                    }
-                ).catch(console.error);
+                fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+                    body: JSON.stringify({ item_id: newItem.id }),
+                }).catch(console.error);
             }
+        }
+        // 월별 가격 저장 (upsert)
+        const targetId = editingItem?.id || itemId;
+        const monthEntries = Object.entries(monthlyPrices)
+            .filter(([, price]) => price > 0)
+            .map(([month, price]) => ({ item_id: targetId, month: Number(month), price: Number(price) }));
+        if (monthEntries.length > 0) {
+            await supabase.from('item_monthly_prices').upsert(monthEntries, { onConflict: 'item_id,month' });
+        }
+        // 값이 0으로 지워진 달은 삭제
+        const clearedMonths = Object.entries(monthlyPrices).filter(([, p]) => p <= 0).map(([m]) => Number(m));
+        if (clearedMonths.length > 0) {
+            await supabase.from('item_monthly_prices').delete().eq('item_id', targetId).in('month', clearedMonths);
         }
         setSavingItem(false); setShowItemForm(false); fetchItems();
     };
+
     const handleDeleteItem = async (id: string) => {
         if (!confirm('정말 삭제하시겠어요?')) return;
+        await supabase.from('item_monthly_prices').delete().eq('item_id', id);
         await supabase.from('items').delete().eq('id', id);
         fetchItems();
     };
@@ -354,14 +334,32 @@ export function AdminDashboard() {
     // ── 엑셀 샘플 다운로드 ──
     const handleDownloadSample = () => {
         const sampleData = [
-            { '도시 ID': 'tokyo', '카테고리': 'accommodation', '품목명': '도쿄 럭셔리 호텔', '설명': '신주쿠역 도보 5분, 조식 포함', '가격': 300000, '이미지 URL': 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26', '제휴 링크': 'https://www.agoda.com', '활성화(Y/N)': 'Y' },
-            { '도시 ID': 'jeju', '카테고리': 'transport', '품목명': '전기차 렌트 (24시간)', '설명': '보험 포함, 완전 자차', '가격': 45000, '이미지 URL': '', '제휴 링크': '', '활성화(Y/N)': 'Y' }
+            {
+                '도시 ID': 'danang', '카테고리': 'tours', '그룹 ID': 'hopping-tour-danang',
+                '품목명': '한바다 호핑투어', '설명': '스노클링+점심 포함',
+                '기본가격': 95000, '1월': 85000, '2월': 85000, '3월': 90000,
+                '4월': 95000, '5월': 100000, '6월': 110000, '7월': 120000,
+                '8월': 120000, '9월': 105000, '10월': 95000, '11월': 85000, '12월': 85000,
+                '이미지 URL': '', '제휴 링크': 'https://example.com', '활성화(Y/N)': 'Y'
+            },
+            {
+                '도시 ID': 'tokyo', '카테고리': 'accommodation', '그룹 ID': '',
+                '품목명': '도쿄 럭셔리 호텔', '설명': '신주쿠역 도보 5분',
+                '기본가격': 300000, '1월': '', '2월': '', '3월': '', '4월': '',
+                '5월': '', '6월': '', '7월': 380000, '8월': 380000,
+                '9월': '', '10월': '', '11월': '', '12월': '',
+                '이미지 URL': '', '제휴 링크': '', '활성화(Y/N)': 'Y'
+            },
         ];
         const ws = XLSX.utils.json_to_sheet(sampleData);
-        ws['!cols'] = [{ wch: 10 }, { wch: 15 }, { wch: 25 }, { wch: 30 }, { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 12 }];
+        ws['!cols'] = [
+            { wch: 10 }, { wch: 14 }, { wch: 22 }, { wch: 25 }, { wch: 25 },
+            { wch: 10 }, ...Array(12).fill({ wch: 8 }),
+            { wch: 30 }, { wch: 30 }, { wch: 10 }
+        ];
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "품목업로드양식");
-        XLSX.writeFile(wb, "여행품목_업로드_양식.xlsx");
+        XLSX.utils.book_append_sheet(wb, ws, '품목업로드양식');
+        XLSX.writeFile(wb, '여행품목_업로드_양식.xlsx');
     };
 
     // ── 엑셀 대량 업로드 ──
@@ -375,32 +373,60 @@ export function AdminDashboard() {
                 const wb = XLSX.read(evt.target?.result, { type: 'binary' });
                 const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]) as any[];
                 if (rows.length === 0) { alert('업로드할 데이터가 없습니다.'); return; }
+
                 const parsedItems = rows.map((row, index) => {
-                    const item: any = { id: `${row['카테고리'] || 'item'}-${Date.now()}-${index}` };
-                    Object.entries(EXCEL_HEADER_MAP).forEach(([kr, en]) => {
-                        let value = row[kr];
-                        if (en === 'price') value = Number(value) || 0;
-                        if (en === 'is_active') value = String(value).toUpperCase() === 'Y';
-                        if (en === 'affiliate_link') value = value || null;
-                        item[en] = value;
+                    const id = `${row['카테고리'] || 'item'}-${Date.now()}-${index}`;
+                    const monthPrices: Record<number, number> = {};
+                    MONTHS.forEach((label, idx) => {
+                        const val = Number(row[label]);
+                        if (val > 0) monthPrices[idx + 1] = val;
                     });
-                    return item;
+                    return {
+                        id,
+                        city: row['도시 ID'] || '',
+                        category: row['카테고리'] || '',
+                        group_id: row['그룹 ID'] || null,
+                        name: row['품목명'] || '',
+                        description: row['설명'] || '',
+                        price: Number(row['기본가격']) || 0,
+                        image: row['이미지 URL'] || '',
+                        affiliate_link: row['제휴 링크'] || null,
+                        is_active: String(row['활성화(Y/N)']).toUpperCase() === 'Y',
+                        _monthPrices: monthPrices,
+                    };
                 });
+
                 const invalidRow = parsedItems.find(i => !i.city || !i.category || !i.name);
                 if (invalidRow) { alert('도시 ID, 카테고리, 품목명은 필수입니다.'); return; }
+
                 setBulkProgress({ current: 0, total: parsedItems.length });
-                const itemsWithImages = [];
+                const finalItems = [];
                 for (let i = 0; i < parsedItems.length; i++) {
                     const item = parsedItems[i];
                     setBulkProgress({ current: i + 1, total: parsedItems.length, label: item.name });
                     if (item.image && item.image.startsWith('http')) {
                         item.image = await uploadImageToStorage(item.image, item.id);
                     }
-                    itemsWithImages.push(item);
+                    finalItems.push(item);
                 }
-                const { error } = await supabase.from('items').insert(itemsWithImages);
+
+                // items INSERT
+                const itemsPayload = finalItems.map(({ _monthPrices, ...rest }) => rest);
+                const { error } = await supabase.from('items').insert(itemsPayload);
                 if (error) throw error;
-                alert(`✅ ${itemsWithImages.length}개 품목 업로드 완료!`);
+
+                // 월별 가격 INSERT
+                const monthlyRows: { item_id: string; month: number; price: number }[] = [];
+                finalItems.forEach(item => {
+                    Object.entries(item._monthPrices).forEach(([month, price]) => {
+                        monthlyRows.push({ item_id: item.id, month: Number(month), price: Number(price) });
+                    });
+                });
+                if (monthlyRows.length > 0) {
+                    await supabase.from('item_monthly_prices').insert(monthlyRows);
+                }
+
+                alert(`✅ ${finalItems.length}개 품목 업로드 완료! (월별가격 ${monthlyRows.length}건)`);
                 fetchItems();
             } catch (err) {
                 console.error(err);
@@ -422,86 +448,66 @@ export function AdminDashboard() {
     const totalClicks = items.reduce((sum, i) => sum + i.click_count, 0);
     const topItems = [...items].sort((a, b) => b.click_count - a.click_count).slice(0, 5);
     const cityLabels = Object.fromEntries(cities.map(c => [c.id, c.name]));
+    const groupLabels = Object.fromEntries(groups.map(g => [g.id, g.name]));
 
-    // ✅ TranslationPanel 컴포넌트 - 진행률 표시 포함
+    // 번역 패널
     const TranslationPanel = () => {
-        const pct = translateProgress
-            ? Math.round((translateProgress.current / translateProgress.total) * 100)
-            : 0;
-
+        const pct = translateProgress ? Math.round((translateProgress.current / translateProgress.total) * 100) : 0;
         const remainingSec = (() => {
             if (!translateProgress || translateProgress.current === 0) return null;
             const elapsed = (Date.now() - translateProgress.startTime) / 1000;
             const perItem = elapsed / translateProgress.current;
             const remaining = perItem * (translateProgress.total - translateProgress.current);
-            if (remaining < 60) return `약 ${Math.ceil(remaining)}초`;
-            return `약 ${Math.ceil(remaining / 60)}분`;
+            return remaining < 60 ? `약 ${Math.ceil(remaining)}초` : `약 ${Math.ceil(remaining / 60)}분`;
         })();
-
         return (
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-                <h2 className="text-lg font-bold text-gray-900 mb-4">🌐 번역 현황</h2>
-                <div className="grid grid-cols-3 gap-4 mb-4">
-                    <div className="text-center p-3 bg-gray-50 rounded-xl">
-                        <p className="text-2xl font-black text-gray-900">{translationStats.total}</p>
-                        <p className="text-xs text-gray-500 mt-1">전체 아이템</p>
-                    </div>
-                    <div className="text-center p-3 bg-blue-50 rounded-xl">
-                        <p className="text-2xl font-black text-blue-600">{translationStats.translated_en}</p>
-                        <p className="text-xs text-blue-400 mt-1">영어 번역 완료</p>
-                    </div>
-                    <div className="text-center p-3 bg-red-50 rounded-xl">
-                        <p className="text-2xl font-black text-red-500">{translationStats.translated_ja}</p>
-                        <p className="text-xs text-red-400 mt-1">일본어 번역 완료</p>
-                    </div>
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                <h2 className="text-sm font-bold text-gray-900 mb-3">🌐 번역 현황</h2>
+                <div className="grid grid-cols-3 gap-3 mb-3">
+                    {[{ label: '전체', val: translationStats.total, color: 'text-gray-900', bg: 'bg-gray-50' },
+                        { label: '영어 완료', val: translationStats.translated_en, color: 'text-blue-600', bg: 'bg-blue-50' },
+                        { label: '일본어 완료', val: translationStats.translated_ja, color: 'text-red-500', bg: 'bg-red-50' }
+                    ].map(c => (
+                        <div key={c.label} className={`text-center p-2.5 ${c.bg} rounded-xl`}>
+                            <p className={`text-xl font-black ${c.color}`}>{c.val}</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">{c.label}</p>
+                        </div>
+                    ))}
                 </div>
-
-                {/* 진행 중 UI */}
                 {translating && translateProgress && (
-                    <div className="mb-4">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm font-semibold text-gray-700">
-                                {translateProgress.current} / {translateProgress.total}개 번역 중...
-                            </span>
-                            <span className="text-xs text-gray-400">
-                                {remainingSec ? `${remainingSec} 남음` : "계산 중..."}
-                            </span>
+                    <div className="mb-3">
+                        <div className="flex justify-between mb-1">
+                            <span className="text-xs font-semibold text-gray-700">{translateProgress.current}/{translateProgress.total}개</span>
+                            <span className="text-[11px] text-gray-400">{remainingSec ? `${remainingSec} 남음` : '계산 중...'}</span>
                         </div>
-                        <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                            <div
-                                className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full transition-all duration-500"
-                                style={{ width: `${pct}%` }}
-                            />
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full transition-all" style={{ width: `${pct}%` }} />
                         </div>
-                        <div className="flex items-center justify-between mt-1.5">
-                            <p className="text-xs text-orange-500 font-medium">⚠ 번역 중 페이지를 닫지 마세요</p>
-                            <p className="text-xs text-gray-400">{pct}%</p>
-                        </div>
+                        <p className="text-[10px] text-orange-500 mt-1">⚠ 번역 중 페이지를 닫지 마세요</p>
                     </div>
                 )}
-
-                {(translationStats.translated_en < translationStats.total ||
-                    translationStats.translated_ja < translationStats.total) && (
-                    <button
-                        onClick={handleBatchTranslate}
-                        disabled={translating}
-                        className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
-                    >
-                        {translating
-                            ? `번역 중... (${translateProgress?.current || 0}/${translateProgress?.total || 0})`
-                            : `미번역 ${translationStats.total - Math.min(translationStats.translated_en, translationStats.translated_ja)}개 일괄 번역`}
+                {(translationStats.translated_en < translationStats.total || translationStats.translated_ja < translationStats.total) ? (
+                    <button onClick={handleBatchTranslate} disabled={translating}
+                            className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-xs font-bold hover:opacity-90 disabled:opacity-50">
+                        {translating ? `번역 중... (${translateProgress?.current || 0}/${translateProgress?.total || 0})` : `미번역 ${translationStats.total - Math.min(translationStats.translated_en, translationStats.translated_ja)}개 일괄 번역`}
                     </button>
+                ) : (
+                    <p className="text-center text-xs text-green-600 font-medium">✅ 모든 아이템 번역 완료</p>
                 )}
-                {translationStats.translated_en >= translationStats.total &&
-                    translationStats.translated_ja >= translationStats.total && (
-                        <p className="text-center text-sm text-green-600 font-medium">✅ 모든 아이템 번역 완료</p>
-                    )}
             </div>
         );
     };
 
+    const TABS = [
+        { id: 'items', label: '품목 관리', icon: Package },
+        { id: 'groups', label: '그룹 관리', icon: Layers },
+        { id: 'cities', label: '나라/도시', icon: Globe },
+        { id: 'stats', label: '통계', icon: BarChart2 },
+    ];
+
     return (
         <div className="min-h-screen bg-gray-50">
+            {/* 헤더 */}
             <div className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
                 <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -515,10 +521,10 @@ export function AdminDashboard() {
                         <LogOut className="w-3.5 h-3.5" /> 로그아웃
                     </button>
                 </div>
-                <div className="max-w-5xl mx-auto px-4 flex gap-1">
-                    {[{ id: 'items', label: '품목 관리', icon: Package }, { id: 'cities', label: '나라/도시 관리', icon: Globe }, { id: 'stats', label: '클릭 통계', icon: BarChart2 }].map(t => (
+                <div className="max-w-5xl mx-auto px-4 flex gap-1 overflow-x-auto">
+                    {TABS.map(t => (
                         <button key={t.id} onClick={() => setTab(t.id as Tab)}
-                                className={`flex items-center gap-1.5 px-4 py-3 text-sm font-semibold border-b-2 transition-all ${tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
+                                className={`flex items-center gap-1.5 px-4 py-3 text-sm font-semibold border-b-2 whitespace-nowrap transition-all ${tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
                             <t.icon className={`w-4 h-4 ${tab === t.id ? 'text-blue-600' : 'text-gray-400'}`} />
                             {t.label}
                         </button>
@@ -527,55 +533,37 @@ export function AdminDashboard() {
             </div>
 
             <div className="max-w-5xl mx-auto px-4 py-6">
+
+                {/* ── 품목 탭 ── */}
                 {tab === 'items' && (
                     <div className="space-y-4">
-
-                        {/* ── 번역 현황 패널 ── */}
                         <TranslationPanel />
 
-                        {/* ── 외부 링크 이미지 경고 + 일괄 이전 버튼 ── */}
                         {externalImageCount > 0 && !isBulkUploading && (
                             <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 flex items-center gap-4">
                                 <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0" />
                                 <div className="flex-1">
-                                    <p className="text-sm font-bold text-orange-900">
-                                        외부 링크 이미지 {externalImageCount}개가 있습니다
-                                    </p>
-                                    <p className="text-xs text-orange-700 mt-0.5">
-                                        네이버, 인스타 등 외부 이미지는 차단될 수 있습니다. 서버로 이전하면 안정적으로 표시됩니다.
-                                    </p>
+                                    <p className="text-sm font-bold text-orange-900">외부 링크 이미지 {externalImageCount}개가 있습니다</p>
+                                    <p className="text-xs text-orange-700 mt-0.5">네이버, 인스타 등 외부 이미지는 차단될 수 있습니다.</p>
                                 </div>
-                                <button
-                                    onClick={handleMigrateImages}
-                                    className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white rounded-xl text-xs font-bold hover:bg-orange-600 transition-all active:scale-95 shadow-md"
-                                >
-                                    <RefreshCw className="w-3.5 h-3.5" />
-                                    지금 이전하기
+                                <button onClick={handleMigrateImages} className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-orange-500 text-white rounded-xl text-xs font-bold hover:bg-orange-600 shadow-md active:scale-95">
+                                    <RefreshCw className="w-3.5 h-3.5" /> 지금 이전하기
                                 </button>
                             </div>
                         )}
 
-                        {/* 진행 상황 바 */}
                         {isBulkUploading && bulkProgress && (
                             <div className="bg-white border border-blue-200 rounded-2xl p-4">
                                 <div className="flex items-center gap-3 mb-3">
                                     <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-bold text-gray-900">
-                                            이미지 서버 저장 중... ({bulkProgress.current}/{bulkProgress.total})
-                                        </p>
-                                        {bulkProgress.label && (
-                                            <p className="text-xs text-gray-400 truncate">{bulkProgress.label}</p>
-                                        )}
+                                        <p className="text-sm font-bold text-gray-900">처리 중... ({bulkProgress.current}/{bulkProgress.total})</p>
+                                        {bulkProgress.label && <p className="text-xs text-gray-400 truncate">{bulkProgress.label}</p>}
                                     </div>
                                 </div>
                                 <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                                    <div className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                                         style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }} />
+                                    <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${(bulkProgress.current / bulkProgress.total) * 100}%` }} />
                                 </div>
-                                <p className="text-xs text-gray-400 text-right mt-1">
-                                    {Math.round((bulkProgress.current / bulkProgress.total) * 100)}%
-                                </p>
                             </div>
                         )}
 
@@ -585,29 +573,25 @@ export function AdminDashboard() {
                             <div className="flex-1">
                                 <div className="flex items-center justify-between mb-1">
                                     <h3 className="text-sm font-bold text-blue-900">대량 업로드 가이드</h3>
-                                    <button onClick={() => setShowExcelHelp(!showExcelHelp)} className="text-xs text-blue-600 font-medium hover:underline">
-                                        {showExcelHelp ? '닫기' : '자세히 보기'}
-                                    </button>
+                                    <button onClick={() => setShowExcelHelp(!showExcelHelp)} className="text-xs text-blue-600 font-medium hover:underline">{showExcelHelp ? '닫기' : '자세히 보기'}</button>
                                 </div>
-                                <p className="text-xs text-blue-700">
-                                    엑셀 업로드 시 이미지가 <span className="font-bold">자동으로 서버에 저장</span>됩니다. 네이버, 인스타 등 외부 링크도 모두 가능합니다.
-                                </p>
+                                <p className="text-xs text-blue-700">엑셀에 <span className="font-bold">그룹 ID · 1월~12월 시즌 가격</span> 컬럼을 추가할 수 있습니다.</p>
                                 {showExcelHelp && (
-                                    <div className="mt-3 pt-3 border-t border-blue-200 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="mt-3 pt-3 border-t border-blue-200 grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px] text-blue-700">
                                         <div>
-                                            <p className="text-xs font-bold text-blue-800 mb-1">✅ 필수 입력값</p>
-                                            <ul className="text-[11px] text-blue-700 space-y-1 list-disc ml-4">
-                                                <li><strong>도시 ID</strong>: 영문 소문자 (예: tokyo)</li>
+                                            <p className="font-bold text-blue-800 mb-1">✅ 필수</p>
+                                            <ul className="list-disc ml-4 space-y-0.5">
+                                                <li><strong>도시 ID</strong>: 영문 소문자 (예: danang)</li>
                                                 <li><strong>카테고리</strong>: accommodation / transport / tours / activities</li>
-                                                <li><strong>품목명</strong>: 사용자에게 보여질 상품명</li>
+                                                <li><strong>품목명</strong> / <strong>기본가격</strong></li>
                                             </ul>
                                         </div>
                                         <div>
-                                            <p className="text-xs font-bold text-blue-800 mb-1">🖼️ 이미지 안내</p>
-                                            <ul className="text-[11px] text-blue-700 space-y-1 list-disc ml-4">
-                                                <li>네이버, 인스타 등 <strong>외부 링크 모두 가능</strong></li>
-                                                <li>업로드 시 자동으로 서버 URL로 변환</li>
-                                                <li>이미지 수만큼 처리 시간 소요</li>
+                                            <p className="font-bold text-blue-800 mb-1">🗓 월별 가격 (선택)</p>
+                                            <ul className="list-disc ml-4 space-y-0.5">
+                                                <li>1월~12월 열에 숫자 입력</li>
+                                                <li>빈 칸은 기본가격으로 표시</li>
+                                                <li>그룹 ID: 같은 투어 업체 묶기</li>
                                             </ul>
                                         </div>
                                     </div>
@@ -615,14 +599,14 @@ export function AdminDashboard() {
                             </div>
                         </div>
 
-                        {/* 필터 & 액션 버튼 */}
+                        {/* 필터 & 액션 */}
                         <div className="flex flex-wrap items-center gap-2">
                             <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-2 py-1.5 shadow-sm">
                                 <select value={filterCity} onChange={e => setFilterCity(e.target.value)} className="text-xs font-medium text-gray-600 bg-transparent border-none focus:ring-0 cursor-pointer">
                                     <option value="all">모든 도시</option>
                                     {cities.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
                                 </select>
-                                <div className="w-[1px] h-3 bg-gray-200" />
+                                <div className="w-px h-3 bg-gray-200" />
                                 <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="text-xs font-medium text-gray-600 bg-transparent border-none focus:ring-0 cursor-pointer">
                                     <option value="all">모든 카테고리</option>
                                     {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
@@ -635,11 +619,11 @@ export function AdminDashboard() {
                                         <Download className="w-3.5 h-3.5 text-gray-400" /> 양식 다운로드
                                     </button>
                                     <button onClick={() => fileInputRef.current?.click()} disabled={isBulkUploading}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-green-600 rounded-lg text-xs font-bold shadow-sm hover:text-green-700 transition-all disabled:opacity-50">
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-green-600 rounded-lg text-xs font-bold shadow-sm hover:text-green-700 disabled:opacity-50">
                                         {isBulkUploading ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> 처리 중...</> : <><FileUp className="w-3.5 h-3.5" /> 엑셀 업로드</>}
                                     </button>
                                 </div>
-                                <button onClick={openCreateItemForm} className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md transition-all active:scale-95">
+                                <button onClick={openCreateItemForm} className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md active:scale-95">
                                     <Plus className="w-4 h-4" /> 품목 추가
                                 </button>
                             </div>
@@ -652,20 +636,14 @@ export function AdminDashboard() {
                                 {filteredItems.map(item => (
                                     <div key={item.id} className={`bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4 hover:border-blue-200 hover:shadow-md transition-all group ${!item.is_active ? 'opacity-50 grayscale' : ''}`}>
                                         <div className="w-14 h-14 rounded-xl overflow-hidden bg-gray-50 flex-shrink-0 border border-gray-100">
-                                            {item.image
-                                                ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                                                : <div className="w-full h-full flex items-center justify-center text-gray-300"><Image className="w-6 h-6" /></div>
-                                            }
+                                            {item.image ? <img src={item.image} alt={item.name} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-300"><Image className="w-6 h-6" /></div>}
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-1.5 mb-1">
+                                            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                                                 <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold">{cityLabels[item.city] || item.city}</span>
                                                 <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold">{CATEGORY_LABELS[item.category]}</span>
-                                                {item.image && (
-                                                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${item.image.includes('supabase') ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-500'}`}>
-                                                        {item.image.includes('supabase') ? '✓ 서버' : '⚠ 외부'}
-                                                    </span>
-                                                )}
+                                                {item.group_id && <span className="text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-bold">🗂 {groupLabels[item.group_id] || item.group_id}</span>}
+                                                {item.image && <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${item.image.includes('supabase') ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-500'}`}>{item.image.includes('supabase') ? '✓ 서버' : '⚠ 외부'}</span>}
                                             </div>
                                             <p className="text-sm font-bold text-gray-900 line-clamp-1">{item.name}</p>
                                             <div className="flex items-center gap-3 mt-1">
@@ -694,13 +672,73 @@ export function AdminDashboard() {
                     </div>
                 )}
 
+                {/* ── 그룹 탭 ── */}
+                {tab === 'groups' && (
+                    <div>
+                        <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4 mb-4 flex items-start gap-3">
+                            <Layers className="w-5 h-5 text-purple-500 mt-0.5 flex-shrink-0" />
+                            <div>
+                                <p className="text-sm font-bold text-purple-900">그룹이란?</p>
+                                <p className="text-xs text-purple-700 mt-0.5">같은 투어·액티비티를 여러 업체가 제공할 때 묶는 기능이에요. 예) "호핑투어" 그룹 → 한바다, 더마크루즈, 골드호핑 품목들. 사용자 화면에서는 업체 비교 테이블로 표시됩니다.</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-between items-center mb-4">
+                            <p className="text-xs text-gray-500 bg-white border border-gray-200 rounded-xl px-4 py-2">총 <span className="text-blue-600 font-bold">{groups.length}개</span> 그룹</p>
+                            <button onClick={openCreateGroupForm} className="flex items-center gap-1.5 px-4 py-2.5 bg-purple-600 text-white rounded-xl text-xs font-bold hover:bg-purple-700 shadow-md active:scale-95">
+                                <Plus className="w-4 h-4" /> 그룹 추가
+                            </button>
+                        </div>
+                        {groupsLoading ? (
+                            <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
+                        ) : (
+                            <div className="space-y-3">
+                                {groups.map(group => {
+                                    const groupItems = items.filter(i => i.group_id === group.id);
+                                    return (
+                                        <div key={group.id} className={`bg-white rounded-2xl border border-gray-100 p-4 hover:border-purple-200 hover:shadow-md transition-all group/card ${!group.is_active ? 'opacity-50 grayscale' : ''}`}>
+                                            <div className="flex items-start gap-3">
+                                                <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center flex-shrink-0">
+                                                    <Layers className="w-6 h-6 text-purple-400" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold">{cityLabels[group.city] || group.city}</span>
+                                                        <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold">{CATEGORY_LABELS[group.category]}</span>
+                                                        <span className="text-[10px] bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded">ID: {group.id}</span>
+                                                    </div>
+                                                    <p className="text-sm font-bold text-gray-900">{group.name}</p>
+                                                    {group.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{group.description}</p>}
+                                                    <p className="text-xs text-purple-500 mt-1 font-medium">소속 품목 {groupItems.length}개{groupItems.length > 0 && `: ${groupItems.slice(0,3).map(i => i.name).join(', ')}${groupItems.length > 3 ? '...' : ''}`}</p>
+                                                </div>
+                                                <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover/card:opacity-100 transition-opacity">
+                                                    <button onClick={() => handleToggleGroup(group)} className="p-2 hover:bg-gray-100 rounded-xl">
+                                                        {group.is_active ? <ToggleRight className="w-6 h-6 text-purple-500" /> : <ToggleLeft className="w-6 h-6 text-gray-300" />}
+                                                    </button>
+                                                    <button onClick={() => openEditGroupForm(group)} className="p-2 hover:bg-purple-50 rounded-xl"><Pencil className="w-4 h-4 text-purple-600" /></button>
+                                                    <button onClick={() => handleDeleteGroup(group.id)} className="p-2 hover:bg-red-50 rounded-xl"><Trash2 className="w-4 h-4 text-red-500" /></button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                {groups.length === 0 && (
+                                    <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
+                                        <Layers className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                                        <p className="text-sm text-gray-400 font-medium">등록된 그룹이 없습니다.</p>
+                                        <p className="text-xs text-gray-300 mt-1">투어 업체 비교를 위해 그룹을 추가해보세요.</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ── 도시 탭 ── */}
                 {tab === 'cities' && (
                     <div>
                         <div className="flex justify-between items-center mb-4">
-                            <div className="bg-white border border-gray-200 rounded-xl px-4 py-2 text-xs text-gray-500 font-medium">
-                                총 <span className="text-blue-600 font-bold">{cities.length}개</span>의 도시
-                            </div>
-                            <button onClick={openCreateCityForm} className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md transition-all active:scale-95">
+                            <p className="text-xs text-gray-500 bg-white border border-gray-200 rounded-xl px-4 py-2">총 <span className="text-blue-600 font-bold">{cities.length}개</span>의 도시</p>
+                            <button onClick={openCreateCityForm} className="flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md active:scale-95">
                                 <Plus className="w-4 h-4" /> 나라/도시 추가
                             </button>
                         </div>
@@ -735,10 +773,14 @@ export function AdminDashboard() {
                     </div>
                 )}
 
+                {/* ── 통계 탭 ── */}
                 {tab === 'stats' && (
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            {[{ label: '전체 품목', value: items.length, color: 'text-gray-900', bg: 'bg-white' }, { label: '활성 품목', value: items.filter(i => i.is_active).length, color: 'text-green-600', bg: 'bg-green-50' }, { label: '총 클릭수', value: totalClicks, color: 'text-blue-600', bg: 'bg-blue-50' }].map(card => (
+                            {[{ label: '전체 품목', value: items.length, color: 'text-gray-900', bg: 'bg-white' },
+                                { label: '활성 품목', value: items.filter(i => i.is_active).length, color: 'text-green-600', bg: 'bg-green-50' },
+                                { label: '총 클릭수', value: totalClicks, color: 'text-blue-600', bg: 'bg-blue-50' }
+                            ].map(card => (
                                 <div key={card.label} className={`${card.bg} rounded-2xl border border-gray-100 p-5 shadow-sm`}>
                                     <p className="text-xs font-bold text-gray-400 uppercase tracking-tight mb-1">{card.label}</p>
                                     <p className={`text-3xl font-black ${card.color}`}>{card.value.toLocaleString()}</p>
@@ -747,7 +789,7 @@ export function AdminDashboard() {
                         </div>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-sm">
-                                <h2 className="text-base font-black text-gray-900 flex items-center gap-2 mb-6"><BarChart2 className="w-5 h-5 text-blue-500" /> 클릭 TOP 5 품목</h2>
+                                <h2 className="text-base font-black text-gray-900 flex items-center gap-2 mb-5"><BarChart2 className="w-5 h-5 text-blue-500" /> 클릭 TOP 5 품목</h2>
                                 <div className="space-y-4">
                                     {topItems.map((item, index) => (
                                         <div key={item.id} className="flex items-center gap-4 p-3 rounded-2xl hover:bg-gray-50">
@@ -763,19 +805,19 @@ export function AdminDashboard() {
                                 </div>
                             </div>
                             <div className="bg-white rounded-3xl border border-gray-100 p-6 shadow-sm">
-                                <h2 className="text-base font-black text-gray-900 flex items-center gap-2 mb-6"><Globe className="w-5 h-5 text-green-500" /> 도시별 클릭 비중</h2>
-                                <div className="space-y-5">
+                                <h2 className="text-base font-black text-gray-900 flex items-center gap-2 mb-5"><Globe className="w-5 h-5 text-green-500" /> 도시별 클릭 비중</h2>
+                                <div className="space-y-4">
                                     {cities.map(city => {
                                         const cityClicks = items.filter(i => i.city === city.id).reduce((sum, i) => sum + i.click_count, 0);
                                         const pct = totalClicks > 0 ? Math.round((cityClicks / totalClicks) * 100) : 0;
                                         return (
                                             <div key={city.id}>
-                                                <div className="flex items-center justify-between mb-2">
+                                                <div className="flex items-center justify-between mb-1.5">
                                                     <span className="text-xs font-bold text-gray-700">{city.emoji} {city.name}</span>
                                                     <span className="text-[11px] text-gray-500 font-bold">{cityClicks}회 ({pct}%)</span>
                                                 </div>
                                                 <div className="h-3 bg-gray-50 rounded-full overflow-hidden border border-gray-100">
-                                                    <div className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all duration-1000" style={{ width: `${pct}%` }} />
+                                                    <div className="h-full bg-gradient-to-r from-blue-400 to-blue-600 rounded-full transition-all" style={{ width: `${pct}%` }} />
                                                 </div>
                                             </div>
                                         );
@@ -787,7 +829,67 @@ export function AdminDashboard() {
                 )}
             </div>
 
-            {/* 도시 모달 */}
+            {/* ── 그룹 모달 ── */}
+            {showGroupForm && (
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl">
+                        <div className="flex items-center justify-between px-6 py-4 border-b">
+                            <h2 className="text-lg font-black text-gray-900">{editingGroup ? '그룹 수정' : '새 그룹 추가'}</h2>
+                            <button onClick={() => setShowGroupForm(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5 text-gray-400" /></button>
+                        </div>
+                        <div className="px-6 py-6 space-y-4">
+                            {!editingGroup && (
+                                <div>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">그룹 ID (영문)</label>
+                                    <input value={groupForm.id} onChange={e => setGroupForm({...groupForm, id: e.target.value})} placeholder="hopping-tour-danang"
+                                           className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-purple-500" />
+                                </div>
+                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">도시</label>
+                                    <select value={groupForm.city} onChange={e => setGroupForm({...groupForm, city: e.target.value})}
+                                            className="w-full bg-gray-50 border-none rounded-2xl px-3 py-3 text-sm font-bold focus:ring-2 focus:ring-purple-500">
+                                        {cities.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">카테고리</label>
+                                    <select value={groupForm.category} onChange={e => setGroupForm({...groupForm, category: e.target.value})}
+                                            className="w-full bg-gray-50 border-none rounded-2xl px-3 py-3 text-sm font-bold focus:ring-2 focus:ring-purple-500">
+                                        {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">그룹명 *</label>
+                                <input value={groupForm.name} onChange={e => setGroupForm({...groupForm, name: e.target.value})} placeholder="호핑투어"
+                                       className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-purple-500" />
+                            </div>
+                            <div>
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">설명</label>
+                                <input value={groupForm.description} onChange={e => setGroupForm({...groupForm, description: e.target.value})} placeholder="다낭 호핑투어 업체 비교"
+                                       className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-medium focus:ring-2 focus:ring-purple-500" />
+                            </div>
+                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
+                                <p className="text-sm font-bold text-gray-900">활성화</p>
+                                <button onClick={() => setGroupForm({...groupForm, is_active: !groupForm.is_active})}
+                                        className={`w-12 h-6 rounded-full transition-all relative ${groupForm.is_active ? 'bg-purple-600' : 'bg-gray-300'}`}>
+                                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all ${groupForm.is_active ? 'left-6' : 'left-0.5'}`} />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="px-6 py-5 border-t flex gap-3">
+                            <button onClick={() => setShowGroupForm(false)} className="flex-1 py-3 text-gray-500 text-sm font-bold hover:bg-gray-50 rounded-2xl">취소</button>
+                            <button onClick={handleSaveGroup} disabled={savingGroup} className="flex-1 py-3 bg-purple-600 text-white rounded-2xl text-sm font-black hover:bg-purple-700 disabled:opacity-50 active:scale-95">
+                                {savingGroup ? '저장 중...' : editingGroup ? '수정 완료' : '그룹 추가'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── 도시 모달 ── */}
             {showCityForm && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl">
@@ -799,39 +901,26 @@ export function AdminDashboard() {
                             {!editingCity && (
                                 <div>
                                     <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">도시 ID (영문)</label>
-                                    <input value={cityForm.id} onChange={e => setCityForm({...cityForm, id: e.target.value})} placeholder="tokyo, jeju-do"
+                                    <input value={cityForm.id} onChange={e => setCityForm({...cityForm, id: e.target.value})} placeholder="tokyo, danang"
                                            className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500" />
                                 </div>
                             )}
                             <div>
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">도시명</label>
-                                <input value={cityForm.name} onChange={e => setCityForm({...cityForm, name: e.target.value})} placeholder="도쿄, 제주"
+                                <input value={cityForm.name} onChange={e => setCityForm({...cityForm, name: e.target.value})} placeholder="도쿄, 다낭"
                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500" />
                             </div>
                             <div>
                                 <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider mb-1.5 block">나라 선택</label>
-                                <select
-                                    value={cityForm.country_code}
-                                    onChange={e => {
-                                        const selected = countries.find(c => c.code === e.target.value);
-                                        setCityForm({ ...cityForm, country_code: e.target.value, emoji: selected?.emoji || '🌏' });
-                                    }}
-                                    className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500"
-                                >
+                                <select value={cityForm.country_code} onChange={e => { const sel = countries.find(c => c.code === e.target.value); setCityForm({ ...cityForm, country_code: e.target.value, emoji: sel?.emoji || '🌏' }); }}
+                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500">
                                     <option value="">나라를 선택하세요</option>
-                                    {countries.map(c => (
-                                        <option key={c.code} value={c.code}>{c.emoji} {c.name}</option>
-                                    ))}
+                                    {countries.map(c => <option key={c.code} value={c.code}>{c.emoji} {c.name}</option>)}
                                 </select>
-                                {cityForm.emoji && (
-                                    <p className="text-xs text-gray-400 mt-1.5 ml-1">선택된 국기: <span className="text-xl">{cityForm.emoji}</span></p>
-                                )}
+                                {cityForm.emoji && <p className="text-xs text-gray-400 mt-1.5 ml-1">선택된 국기: <span className="text-xl">{cityForm.emoji}</span></p>}
                             </div>
                             <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                                <div>
-                                    <p className="text-sm font-bold text-gray-900">활성화</p>
-                                    <p className="text-[10px] text-gray-400">사용자 화면에 노출됩니다</p>
-                                </div>
+                                <div><p className="text-sm font-bold text-gray-900">활성화</p><p className="text-[10px] text-gray-400">사용자 화면에 노출됩니다</p></div>
                                 <button onClick={() => setCityForm({...cityForm, is_active: !cityForm.is_active})}
                                         className={`w-12 h-6 rounded-full transition-all relative ${cityForm.is_active ? 'bg-blue-600' : 'bg-gray-300'}`}>
                                     <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all ${cityForm.is_active ? 'left-6' : 'left-0.5'}`} />
@@ -848,7 +937,7 @@ export function AdminDashboard() {
                 </div>
             )}
 
-            {/* 품목 모달 */}
+            {/* ── 품목 모달 ── */}
             {showItemForm && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
                     <div className="bg-white rounded-3xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -856,42 +945,64 @@ export function AdminDashboard() {
                             <h2 className="text-lg font-black text-gray-900">{editingItem ? '품목 수정' : '새 품목 등록'}</h2>
                             <button onClick={() => setShowItemForm(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5 text-gray-400" /></button>
                         </div>
-                        <div className="px-6 py-6 space-y-6">
+                        <div className="px-6 py-6 space-y-5">
+                            {/* 도시 + 카테고리 */}
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">도시</label>
-                                    <select value={itemForm.city} onChange={e => setItemForm({...itemForm, city: e.target.value})}
+                                <div>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">도시</label>
+                                    <select value={itemForm.city} onChange={e => setItemForm({...itemForm, city: e.target.value, group_id: ''})}
                                             className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500">
                                         {cities.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
                                     </select>
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">카테고리</label>
-                                    <select value={itemForm.category} onChange={e => setItemForm({...itemForm, category: e.target.value})}
+                                <div>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">카테고리</label>
+                                    <select value={itemForm.category} onChange={e => setItemForm({...itemForm, category: e.target.value, group_id: ''})}
                                             className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500">
                                         {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
                                     </select>
                                 </div>
                             </div>
-                            <div className="space-y-1.5">
-                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">품목명 *</label>
+
+                            {/* 그룹 선택 */}
+                            <div>
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5 flex items-center gap-1.5">
+                                    <Layers className="w-3.5 h-3.5 text-purple-400" /> 그룹 (선택사항)
+                                </label>
+                                <select value={itemForm.group_id} onChange={e => setItemForm({...itemForm, group_id: e.target.value})}
+                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-purple-400">
+                                    <option value="">그룹 없음 (단독 품목)</option>
+                                    {groups.filter(g => g.city === itemForm.city && g.category === itemForm.category).map(g => (
+                                        <option key={g.id} value={g.id}>{g.name}</option>
+                                    ))}
+                                </select>
+                                <p className="text-[10px] text-gray-400 mt-1 ml-1">같은 투어 업체 비교 시 그룹에 포함하세요</p>
+                            </div>
+
+                            {/* 품목명 */}
+                            <div>
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">품목명 *</label>
                                 <input value={itemForm.name} onChange={e => setItemForm({...itemForm, name: e.target.value})} placeholder="상품명"
                                        className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500" />
                             </div>
-                            <div className="space-y-1.5">
-                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">설명</label>
+
+                            {/* 설명 */}
+                            <div>
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">설명</label>
                                 <textarea value={itemForm.description} onChange={e => setItemForm({...itemForm, description: e.target.value})} rows={2}
                                           placeholder="상품 간략 설명"
                                           className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-blue-500 resize-none" />
                             </div>
+
+                            {/* 기본 가격 + 활성화 */}
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">가격 (₩) *</label>
+                                <div>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">기본 가격 (₩) *</label>
                                     <input type="number" value={itemForm.price} onChange={e => setItemForm({...itemForm, price: Number(e.target.value)})}
                                            className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-black focus:ring-2 focus:ring-blue-500" />
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1">사용 여부</label>
+                                <div>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">사용 여부</label>
                                     <button onClick={() => setItemForm({...itemForm, is_active: !itemForm.is_active})}
                                             className={`w-full h-[46px] rounded-2xl flex items-center justify-center gap-2 font-bold text-sm border-2 transition-all ${itemForm.is_active ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-gray-50 text-gray-400 border-transparent'}`}>
                                         {itemForm.is_active ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
@@ -899,9 +1010,38 @@ export function AdminDashboard() {
                                     </button>
                                 </div>
                             </div>
+
+                            {/* 월별 가격 */}
+                            <div className="pt-2 border-t border-gray-100">
+                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-2 flex items-center gap-1.5">
+                                    <CalendarDays className="w-3.5 h-3.5 text-blue-400" /> 월별 가격 (시즌별 조정)
+                                    <span className="text-[10px] text-gray-300 font-normal">빈 칸 = 기본 가격 사용</span>
+                                </label>
+                                <div className="grid grid-cols-4 gap-2">
+                                    {MONTHS.map((label, idx) => {
+                                        const month = idx + 1;
+                                        const val = monthlyPrices[month];
+                                        return (
+                                            <div key={month}>
+                                                <p className="text-[10px] text-gray-400 font-bold mb-1 text-center">{label}</p>
+                                                <input
+                                                    type="number"
+                                                    placeholder={itemForm.price > 0 ? String(itemForm.price) : '0'}
+                                                    value={val || ''}
+                                                    onChange={e => setMonthlyPrices(prev => ({ ...prev, [month]: Number(e.target.value) }))}
+                                                    className={`w-full bg-gray-50 border rounded-xl px-2 py-2 text-xs font-bold text-center focus:ring-1 focus:ring-blue-400 focus:border-blue-400 ${val && val !== itemForm.price ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-transparent'}`}
+                                                />
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <p className="text-[10px] text-blue-500 mt-2">💡 기본 가격과 다른 달은 파란색으로 표시됩니다</p>
+                            </div>
+
+                            {/* 이미지 + 제휴링크 */}
                             <div className="space-y-4 pt-2 border-t border-gray-100">
-                                <div className="space-y-1.5">
-                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1 flex items-center gap-1.5">
+                                <div>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5 flex items-center gap-1.5">
                                         <Image className="w-3.5 h-3.5" /> 이미지 URL
                                         <span className="text-[10px] text-blue-500 font-normal">저장 시 자동으로 서버에 복사됩니다</span>
                                     </label>
@@ -909,12 +1049,12 @@ export function AdminDashboard() {
                                            placeholder="https://... (외부 링크 가능)"
                                            className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-xs font-medium focus:ring-2 focus:ring-blue-500" />
                                     {itemForm.image?.startsWith('http') && (
-                                        <img src={itemForm.image} alt="미리보기" className="w-full h-32 object-cover rounded-xl mt-2"
+                                        <img src={itemForm.image} alt="미리보기" className="w-full h-28 object-cover rounded-xl mt-2"
                                              onError={e => (e.currentTarget.style.display = 'none')} />
                                     )}
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block ml-1 flex items-center gap-1.5">
+                                <div>
+                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5 flex items-center gap-1.5">
                                         <Link className="w-3.5 h-3.5 text-blue-500" /> 제휴 링크
                                     </label>
                                     <input value={itemForm.affiliate_link} onChange={e => setItemForm({...itemForm, affiliate_link: e.target.value})}
@@ -926,7 +1066,7 @@ export function AdminDashboard() {
                         <div className="px-6 py-5 border-t bg-gray-50 flex gap-3 sticky bottom-0 z-10">
                             <button onClick={() => setShowItemForm(false)} className="flex-1 py-3 text-gray-500 text-sm font-bold hover:bg-white rounded-2xl">취소</button>
                             <button onClick={handleSaveItem} disabled={savingItem} className="flex-1 py-3 bg-blue-600 text-white rounded-2xl text-sm font-black hover:bg-blue-700 disabled:opacity-50 active:scale-95">
-                                {savingItem ? '이미지 저장 중...' : editingItem ? '수정 완료' : '품목 등록'}
+                                {savingItem ? '저장 중...' : editingItem ? '수정 완료' : '품목 등록'}
                             </button>
                         </div>
                     </div>
