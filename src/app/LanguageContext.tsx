@@ -88,6 +88,40 @@ const translations = {
     'misc.all': '전체',
     'misc.select_city': '여행지 선택',
 
+    // 날짜 선택
+    'date.travel_schedule': '여행 일정',
+    'date.optional': '선택사항',
+    'date.reset': '초기화',
+    'date.enter_date': '날짜 입력하기',
+    'date.close': '닫기',
+    'date.departure': '출발일',
+    'date.return': '귀국일',
+    'date.hint': '날짜를 입력하면 숙박비를 자동으로 계산해드려요',
+    'date.nights_auto': '총 {n}박 · 숙박비가 자동으로 계산됩니다',
+    'date.select_return': '귀국일을 선택해주세요',
+
+    // 개수 조절
+    'calc.nights_badge': '🌙 박수 조절 가능',
+    'calc.persons_badge': '👥 인원수 조절 가능',
+    'calc.tickets_badge': '🎟 매수 조절 가능',
+    'calc.nights_auto': '📅 {n}박 자동 설정',
+    'calc.accommodation_desc': '박수를 조절해 숙박비를 계산해보세요',
+    'calc.accommodation_desc_auto': '여행 기간 {n}박이 자동으로 설정됩니다',
+    'calc.transport_desc': '인원수를 조절해 교통 비용을 계산해보세요',
+    'calc.tours_desc': '경험하고 싶은 투어를 선택해보세요',
+    'calc.activities_desc': '매수를 조절해 입장권 비용을 계산해보세요',
+    'calc.unit_night': '{n}박',
+    'calc.unit_person': '{n}명',
+    'calc.unit_ticket': '{n}매',
+    'calc.basis': '기준',
+    'calc.date_basis': '날짜 기준',
+    'calc.total_cost_label': '총',
+
+    // KakaoPreview
+    'preview.greeting': '안녕하세요! 😊\n선택하신 여행 견적서를 보내드립니다.',
+    'preview.itinerary': '여행 견적서',
+    'preview.book_now': '예약 페이지 바로가기',
+
   },
   en: {
     // BlogPost (Main)
@@ -168,6 +202,40 @@ const translations = {
     'misc.all': 'All',
     'misc.select_city': 'Select Destination',
 
+    // 날짜 선택
+    'date.travel_schedule': 'Travel Schedule',
+    'date.optional': 'Optional',
+    'date.reset': 'Reset',
+    'date.enter_date': 'Enter dates',
+    'date.close': 'Close',
+    'date.departure': 'Departure',
+    'date.return': 'Return',
+    'date.hint': 'Enter dates and we\'ll automatically calculate accommodation costs',
+    'date.nights_auto': '{n} nights total · Accommodation costs will be calculated automatically',
+    'date.select_return': 'Please select a return date',
+
+    // 개수 조절
+    'calc.nights_badge': '🌙 Nights adjustable',
+    'calc.persons_badge': '👥 Persons adjustable',
+    'calc.tickets_badge': '🎟 Tickets adjustable',
+    'calc.nights_auto': '📅 {n} nights auto-set',
+    'calc.accommodation_desc': 'Adjust the number of nights to calculate accommodation costs',
+    'calc.accommodation_desc_auto': '{n} nights have been automatically set based on your travel dates',
+    'calc.transport_desc': 'Adjust the number of people to calculate transport costs',
+    'calc.tours_desc': 'Select the tours you want to experience',
+    'calc.activities_desc': 'Adjust ticket quantity to calculate activity costs',
+    'calc.unit_night': '{n} nights',
+    'calc.unit_person': '{n} people',
+    'calc.unit_ticket': '{n} tickets',
+    'calc.basis': 'basis',
+    'calc.date_basis': 'by date',
+    'calc.total_cost_label': 'Total',
+
+    // KakaoPreview
+    'preview.greeting': 'Hello! 😊\nHere is your personalized travel quote.',
+    'preview.itinerary': 'Travel Quote',
+    'preview.book_now': 'Go to Booking Page',
+
   },
   ja: {
     // BlogPost (Main)
@@ -247,6 +315,40 @@ const translations = {
     'city.seoul': 'ソウル',
     'misc.all': 'すべて',
     'misc.select_city': '旅行先を選択',
+
+    // 날짜 선택
+    'date.travel_schedule': '旅行日程',
+    'date.optional': '任意',
+    'date.reset': 'リセット',
+    'date.enter_date': '日程を入力',
+    'date.close': '閉じる',
+    'date.departure': '出発日',
+    'date.return': '帰国日',
+    'date.hint': '日程を入力すると宿泊費を自動的に計算します',
+    'date.nights_auto': '合計{n}泊・宿泊費が自動的に計算されます',
+    'date.select_return': '帰国日を選択してください',
+
+    // 개수 조절
+    'calc.nights_badge': '🌙 泊数調整可能',
+    'calc.persons_badge': '👥 人数調整可能',
+    'calc.tickets_badge': '🎟 枚数調整可能',
+    'calc.nights_auto': '📅 {n}泊を自動設定',
+    'calc.accommodation_desc': '泊数を調整して宿泊費を計算してください',
+    'calc.accommodation_desc_auto': '旅行期間の{n}泊が自動設定されます',
+    'calc.transport_desc': '人数を調整して交通費を計算してください',
+    'calc.tours_desc': '体験したいツアーを選んでください',
+    'calc.activities_desc': '枚数を調整してチケット費用を計算してください',
+    'calc.unit_night': '{n}泊',
+    'calc.unit_person': '{n}人',
+    'calc.unit_ticket': '{n}枚',
+    'calc.basis': '基準',
+    'calc.date_basis': '日程基準',
+    'calc.total_cost_label': '合計',
+
+    // KakaoPreview
+    'preview.greeting': 'こんにちは！ 😊\nお選びいただいた旅行見積書をお送りします。',
+    'preview.itinerary': '旅行見積書',
+    'preview.book_now': '予約ページへ',
 
   }
 };
