@@ -19,7 +19,7 @@ interface City { id: string; name: string; emoji: string; is_active: boolean; }
 
 const STEP_IDS = ['accommodation', 'transport', 'tours', 'activities'] as const;
 type StepId = typeof STEP_IDS[number];
-const QUANTITY_CATEGORIES: StepId[] = ['accommodation', 'transport', 'activities'];
+const QUANTITY_CATEGORIES: StepId[] = ['accommodation', 'transport', 'tours', 'activities'];
 type Phase = 'selectCity' | 'selectItems';
 
 function emojiToFlagUrl(emoji: string): string | null {
@@ -115,7 +115,14 @@ export function StepCalculator() {
     if (language === 'ja') return `${city}の${cat}を選択`;
     return `${city}의 ${cat} 선택`;
   };
-  const getBadgeText = () => { if (currentCategory === 'accommodation') return t('calc.nights_badge'); if (currentCategory === 'transport') return t('calc.persons_badge'); return t('calc.tickets_badge'); };
+
+  const getBadgeText = () => {
+    if (currentCategory === 'accommodation') return t('calc.nights_badge');
+    if (currentCategory === 'transport') return t('calc.persons_badge');
+    if (currentCategory === 'tours') return t('calc.persons_badge'); // 👥 인원수 조절 가능
+    return t('calc.tickets_badge');
+  };
+
   const getStepDesc = () => {
     if (currentCategory === 'accommodation') return hasDateRange && nights > 0 ? t('calc.accommodation_desc_auto').replace('{n}', String(nights)) : t('calc.accommodation_desc');
     if (currentCategory === 'transport') return t('calc.transport_desc');
@@ -125,6 +132,7 @@ export function StepCalculator() {
   const getUnitLabel = (category: string, qty: number) => {
     if (category === 'accommodation') return t('calc.unit_night').replace('{n}', String(qty));
     if (category === 'transport') return t('calc.unit_person').replace('{n}', String(qty));
+    if (category === 'tours') return t('calc.unit_person').replace('{n}', String(qty)); // 투어도 인원수
     return t('calc.unit_ticket').replace('{n}', String(qty));
   };
 
