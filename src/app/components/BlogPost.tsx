@@ -31,13 +31,22 @@ export function BlogPost() {
           <p className="text-white/90 text-sm md:text-lg mb-8 max-w-md font-medium whitespace-pre-line">
             {t('hero.subtitle')}
           </p>
-          <button 
-            onClick={handleStart}
-            className="group bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl shadow-blue-600/30 transition-all active:scale-95 flex items-center gap-2"
-          >
-            {t('hero.button')}
-            <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+                onClick={() => navigate(`/${lang}/package-calculator`)}
+                className="group bg-amber-500 hover:bg-amber-600 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-xl transition-all active:scale-95 flex items-center gap-2"
+            >
+              🎁 패키지 추천받기
+              <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            </button>
+            <button
+                onClick={() => navigate(`/${lang}/step-calculator`)}
+                className="group bg-white/20 backdrop-blur-sm hover:bg-white/30 text-white px-8 py-4 rounded-2xl font-bold text-lg border border-white/40 transition-all active:scale-95 flex items-center gap-2"
+            >
+              ✏️ 직접 선택하기
+              <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
         </div>
       </div>
 

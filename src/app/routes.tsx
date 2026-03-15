@@ -6,6 +6,8 @@ import { KakaoPreview } from "./components/KakaoPreview";
 import { AdminLogin } from "./components/AdminLogin";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { LanguageWrapper } from "./components/LanguageWrapper";
+import { PackageCalculator } from "./components/PackageCalculator";
+
 
 export const router = createBrowserRouter([
   {
@@ -35,6 +37,10 @@ export const router = createBrowserRouter([
       {
         path: "kakao-preview",
         element: <KakaoPreview />,
+      },
+      {
+        path: "package-calculator",
+        element: <PackageCalculator />,
       },
     ],
   },

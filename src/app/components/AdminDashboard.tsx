@@ -5,7 +5,8 @@ import * as XLSX from 'xlsx';
 import {
     LogOut, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
     BarChart2, Package, Link, X, Check, Globe, FileUp, Download,
-    Info, AlertCircle, Image, Loader2, RefreshCw, Layers, CalendarDays
+    Info, AlertCircle, Image, Loader2, RefreshCw, Layers, CalendarDays,
+    Gift, Search, Users, Sparkles
 } from "lucide-react";
 
 interface TravelItem {
@@ -27,6 +28,30 @@ interface City {
 
 interface Country { code: string; name: string; emoji: string; }
 
+interface TravelPackage {
+    id: string;
+    city: string;
+    name: string;
+    description: string;
+    theme_who: string[];
+    theme_style: string[];
+    is_active: boolean;
+    created_at: string;
+}
+
+const THEME_WHO = [
+    { id: 'family',    label: '👨‍👩‍👧‍👦 가족 (어린이 포함)' },
+    { id: 'parents',   label: '👴👵 부모님 모시고' },
+    { id: 'couple',    label: '👫 친구 / 연인' },
+    { id: 'honeymoon', label: '💍 신혼여행' },
+    { id: 'solo',      label: '🧑 혼자' },
+];
+const THEME_STYLE = [
+    { id: 'luxury', label: '✨ 럭셔리' },
+    { id: 'normal', label: '⚖️ 보통' },
+    { id: 'budget', label: '💰 가성비' },
+];
+
 const CATEGORIES = ['accommodation', 'transport', 'tours', 'activities'];
 const CATEGORY_LABELS: Record<string, string> = {
     accommodation: '숙소', transport: '교통', tours: '투어', activities: '액티비티'
@@ -42,7 +67,7 @@ const EMPTY_GROUP_FORM = {
 };
 const EMPTY_CITY_FORM = { id: '', name: '', emoji: '🌏', country_code: '', is_active: true };
 
-type Tab = 'items' | 'groups' | 'cities' | 'stats';
+type Tab = 'items' | 'groups' | 'packages' | 'cities' | 'stats';
 
 const BUCKET = 'item-images';
 
@@ -99,6 +124,20 @@ export function AdminDashboard() {
     const [translating, setTranslating] = useState(false);
     const [translateProgress, setTranslateProgress] = useState<{ current: number; total: number; startTime: number } | null>(null);
 
+    // ── 패키지 state ──
+    const [packages, setPackages] = useState<TravelPackage[]>([]);
+    const [packagesLoading, setPackagesLoading] = useState(true);
+    const [showPackageForm, setShowPackageForm] = useState(false);
+    const [editingPackage, setEditingPackage] = useState<TravelPackage | null>(null);
+    const [packageForm, setPackageForm] = useState({
+        id: '', city: '', name: '', description: '',
+        theme_who: [] as string[], theme_style: [] as string[], is_active: true,
+    });
+    const [packageItemIds, setPackageItemIds] = useState<string[]>([]);
+    const [savingPackage, setSavingPackage] = useState(false);
+    const [pkgSearchText, setPkgSearchText] = useState('');
+    const [pkgFilterCat, setPkgFilterCat] = useState('all');
+
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
             if (!session) navigate('/admin');
@@ -128,8 +167,15 @@ export function AdminDashboard() {
         setGroupsLoading(false);
     };
 
-    useEffect(() => { fetchCities(); fetchItems(); fetchGroups(); }, []);
+    useEffect(() => { fetchCities(); fetchItems(); fetchGroups(); fetchPackages(); }, []);
     useEffect(() => { fetchItems(); }, [sortBy]);
+
+    const fetchPackages = async () => {
+        setPackagesLoading(true);
+        const { data } = await supabase.from('packages').select('*').order('created_at', { ascending: false });
+        setPackages(data || []);
+        setPackagesLoading(false);
+    };
 
     // 번역 통계
     useEffect(() => {
@@ -143,6 +189,56 @@ export function AdminDashboard() {
     }, [items]);
 
     const handleLogout = async () => { await supabase.auth.signOut(); navigate('/admin'); };
+
+    // ── 패키지 관리 ──
+    const openCreatePackageForm = () => {
+        setEditingPackage(null);
+        setPackageForm({ id: '', city: cities[0]?.id || '', name: '', description: '', theme_who: [], theme_style: [], is_active: true });
+        setPackageItemIds([]);
+        setPkgSearchText(''); setPkgFilterCat('all');
+        setShowPackageForm(true);
+    };
+    const openEditPackageForm = async (pkg: TravelPackage) => {
+        setEditingPackage(pkg);
+        setPackageForm({ id: pkg.id, city: pkg.city, name: pkg.name, description: pkg.description, theme_who: pkg.theme_who || [], theme_style: pkg.theme_style || [], is_active: pkg.is_active });
+        const { data } = await supabase.from('package_items').select('item_id').eq('package_id', pkg.id).order('sort_order');
+        setPackageItemIds((data || []).map((r: any) => r.item_id));
+        setPkgSearchText(''); setPkgFilterCat('all');
+        setShowPackageForm(true);
+    };
+    const toggleThemeTag = (arr: string[], val: string) =>
+        arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val];
+
+    const handleSavePackage = async () => {
+        if (!packageForm.name) return alert('패키지 이름은 필수입니다.');
+        if (!editingPackage && !packageForm.id) return alert('패키지 ID는 필수입니다.');
+        if (packageForm.theme_who.length === 0) return alert('누구와 여행인지 선택해주세요.');
+        if (packageForm.theme_style.length === 0) return alert('여행 스타일을 선택해주세요.');
+        if (packageItemIds.length === 0) return alert('최소 1개 이상의 품목을 선택해주세요.');
+        setSavingPackage(true);
+        const pkgId = editingPackage?.id || packageForm.id.toLowerCase().replace(/\s+/g, '-');
+        const payload = { city: packageForm.city, name: packageForm.name, description: packageForm.description, theme_who: packageForm.theme_who, theme_style: packageForm.theme_style, is_active: packageForm.is_active };
+        if (editingPackage) {
+            await supabase.from('packages').update(payload).eq('id', pkgId);
+        } else {
+            await supabase.from('packages').insert({ id: pkgId, ...payload });
+        }
+        await supabase.from('package_items').delete().eq('package_id', pkgId);
+        if (packageItemIds.length > 0) {
+            await supabase.from('package_items').insert(packageItemIds.map((itemId, idx) => ({ package_id: pkgId, item_id: itemId, sort_order: idx })));
+        }
+        setSavingPackage(false); setShowPackageForm(false); fetchPackages();
+    };
+    const handleDeletePackage = async (id: string) => {
+        if (!confirm('패키지를 삭제합니다. 포함된 품목은 유지됩니다.')) return;
+        await supabase.from('package_items').delete().eq('package_id', id);
+        await supabase.from('packages').delete().eq('id', id);
+        fetchPackages();
+    };
+    const handleTogglePackage = async (pkg: TravelPackage) => {
+        await supabase.from('packages').update({ is_active: !pkg.is_active }).eq('id', pkg.id);
+        fetchPackages();
+    };
 
     // ── 일괄 번역 ──
     const handleBatchTranslate = async () => {
@@ -446,6 +542,14 @@ export function AdminDashboard() {
     });
     const externalImageCount = items.filter(i => i.image && i.image.startsWith('http') && !i.image.includes('supabase')).length;
     const totalClicks = items.reduce((sum, i) => sum + i.click_count, 0);
+
+    // 패키지 탭용 계산 변수
+    const cityItemsForPkg = items.filter(i => i.city === packageForm.city && i.is_active);
+    const filteredPkgItems = cityItemsForPkg.filter(i => {
+        const matchCat = pkgFilterCat === 'all' || i.category === pkgFilterCat;
+        const matchText = !pkgSearchText || i.name.toLowerCase().includes(pkgSearchText.toLowerCase());
+        return matchCat && matchText;
+    });
     const topItems = [...items].sort((a, b) => b.click_count - a.click_count).slice(0, 5);
     const cityLabels = Object.fromEntries(cities.map(c => [c.id, c.name]));
     const groupLabels = Object.fromEntries(groups.map(g => [g.id, g.name]));
@@ -499,10 +603,11 @@ export function AdminDashboard() {
     };
 
     const TABS = [
-        { id: 'items', label: '품목 관리', icon: Package },
-        { id: 'groups', label: '그룹 관리', icon: Layers },
-        { id: 'cities', label: '나라/도시', icon: Globe },
-        { id: 'stats', label: '통계', icon: BarChart2 },
+        { id: 'items',    label: '품목 관리',   icon: Package },
+        { id: 'groups',   label: '그룹 관리',   icon: Layers },
+        { id: 'packages', label: '패키지 관리', icon: Gift },
+        { id: 'cities',   label: '나라/도시',   icon: Globe },
+        { id: 'stats',    label: '통계',        icon: BarChart2 },
     ];
 
     return (
@@ -728,6 +833,231 @@ export function AdminDashboard() {
                                         <p className="text-xs text-gray-300 mt-1">투어 업체 비교를 위해 그룹을 추가해보세요.</p>
                                     </div>
                                 )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ── 패키지 탭 ── */}
+                {tab === 'packages' && (
+                    <div>
+                        <div className="flex justify-between items-center mb-4">
+                            <div className="bg-white border border-gray-200 rounded-xl px-4 py-2 text-xs text-gray-500 font-medium">
+                                총 <span className="text-amber-600 font-bold">{packages.length}개</span>의 패키지
+                            </div>
+                            <button onClick={openCreatePackageForm} className="flex items-center gap-1.5 px-4 py-2.5 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 shadow-md transition-all active:scale-95">
+                                <Plus className="w-4 h-4" /> 패키지 추가
+                            </button>
+                        </div>
+
+                        <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 mb-4 flex items-start gap-3">
+                            <Gift className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                            <p className="text-xs text-amber-700">
+                                <strong>누구와 · 여행 스타일</strong> 태그 조합으로 사용자에게 맞춤 패키지를 추천합니다.
+                                기존 품목들을 골라 묶으면 PackageCalculator 페이지에서 자동으로 매칭됩니다.
+                            </p>
+                        </div>
+
+                        {packagesLoading ? (
+                            <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-24 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
+                        ) : packages.length === 0 ? (
+                            <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
+                                <Gift className="w-10 h-10 text-gray-200 mx-auto mb-3" />
+                                <p className="text-sm text-gray-400">등록된 패키지가 없습니다.</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {packages.map(pkg => (
+                                    <div key={pkg.id} className={`bg-white rounded-2xl border border-gray-100 p-4 hover:border-amber-200 hover:shadow-md transition-all group ${!pkg.is_active ? 'opacity-50 grayscale' : ''}`}>
+                                        <div className="flex items-start gap-3">
+                                            <div className="w-10 h-10 rounded-2xl bg-amber-50 flex items-center justify-center flex-shrink-0">
+                                                <Gift className="w-5 h-5 text-amber-500" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                                    <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-bold">{cityLabels[pkg.city] || pkg.city}</span>
+                                                    {(pkg.theme_who || []).map(w => (
+                                                        <span key={w} className="text-[10px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-bold">
+                                                                    {THEME_WHO.find(t => t.id === w)?.label || w}
+                                                                </span>
+                                                    ))}
+                                                    {(pkg.theme_style || []).map(s => (
+                                                        <span key={s} className="text-[10px] bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-bold">
+                                                                    {THEME_STYLE.find(t => t.id === s)?.label || s}
+                                                                </span>
+                                                    ))}
+                                                </div>
+                                                <p className="text-sm font-bold text-gray-900">{pkg.name}</p>
+                                                {pkg.description && <p className="text-[11px] text-gray-400 mt-0.5 truncate">{pkg.description}</p>}
+                                            </div>
+                                            <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button onClick={() => handleTogglePackage(pkg)} className="p-2 hover:bg-gray-100 rounded-xl">
+                                                    {pkg.is_active ? <ToggleRight className="w-6 h-6 text-blue-500" /> : <ToggleLeft className="w-6 h-6 text-gray-300" />}
+                                                </button>
+                                                <button onClick={() => openEditPackageForm(pkg)} className="p-2 hover:bg-amber-50 rounded-xl"><Pencil className="w-4 h-4 text-amber-600" /></button>
+                                                <button onClick={() => handleDeletePackage(pkg.id)} className="p-2 hover:bg-red-50 rounded-xl"><Trash2 className="w-4 h-4 text-red-500" /></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* 패키지 모달 */}
+                        {showPackageForm && (
+                            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+                                <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl">
+                                    <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
+                                        <h2 className="text-lg font-black text-gray-900">{editingPackage ? '패키지 수정' : '새 패키지 추가'}</h2>
+                                        <button onClick={() => setShowPackageForm(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5 text-gray-400" /></button>
+                                    </div>
+                                    <div className="px-6 py-6 space-y-6">
+
+                                        {/* 기본 정보 */}
+                                        <div className="space-y-4">
+                                            <h3 className="text-xs font-black text-gray-400 uppercase tracking-wider">기본 정보</h3>
+                                            {!editingPackage && (
+                                                <div>
+                                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">패키지 ID (영문)</label>
+                                                    <input value={packageForm.id} onChange={e => setPackageForm({...packageForm, id: e.target.value})} placeholder="danang-family-luxury"
+                                                           className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-amber-400" />
+                                                </div>
+                                            )}
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">도시</label>
+                                                    <select value={packageForm.city} onChange={e => setPackageForm({...packageForm, city: e.target.value})} disabled={!!editingPackage}
+                                                            className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-amber-400 disabled:opacity-50">
+                                                        {cities.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">패키지 이름 *</label>
+                                                    <input value={packageForm.name} onChange={e => setPackageForm({...packageForm, name: e.target.value})} placeholder="다낭 가족 럭셔리 패키지"
+                                                           className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-amber-400" />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-black text-gray-400 uppercase tracking-wider block mb-1.5">설명 (선택)</label>
+                                                <input value={packageForm.description} onChange={e => setPackageForm({...packageForm, description: e.target.value})} placeholder="패키지 한줄 소개"
+                                                       className="w-full bg-gray-50 border-none rounded-2xl px-4 py-3 text-sm font-bold focus:ring-2 focus:ring-amber-400" />
+                                            </div>
+                                        </div>
+
+                                        {/* 테마 태그 */}
+                                        <div className="space-y-4">
+                                            <h3 className="text-xs font-black text-gray-400 uppercase tracking-wider flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> 누구와 떠나는 여행? *</h3>
+                                            <div className="flex flex-wrap gap-2">
+                                                {THEME_WHO.map(t => (
+                                                    <button key={t.id} onClick={() => setPackageForm({...packageForm, theme_who: toggleThemeTag(packageForm.theme_who, t.id)})}
+                                                            className={`px-3 py-2 rounded-2xl text-xs font-bold transition-all border-2 ${packageForm.theme_who.includes(t.id) ? 'bg-purple-600 text-white border-purple-600' : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-purple-300'}`}>
+                                                        {t.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <h3 className="text-xs font-black text-gray-400 uppercase tracking-wider flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" /> 여행 스타일? *</h3>
+                                            <div className="flex flex-wrap gap-2">
+                                                {THEME_STYLE.map(t => (
+                                                    <button key={t.id} onClick={() => setPackageForm({...packageForm, theme_style: toggleThemeTag(packageForm.theme_style, t.id)})}
+                                                            className={`px-4 py-2 rounded-2xl text-xs font-bold transition-all border-2 ${packageForm.theme_style.includes(t.id) ? 'bg-amber-500 text-white border-amber-500' : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-amber-300'}`}>
+                                                        {t.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* 품목 선택 */}
+                                        <div className="space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <h3 className="text-xs font-black text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                                                    <Package className="w-3.5 h-3.5" /> 포함 품목 선택 *
+                                                </h3>
+                                                <span className="text-[11px] text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-full">{packageItemIds.length}개 선택됨</span>
+                                            </div>
+
+                                            {/* 선택된 품목 순서 표시 */}
+                                            {packageItemIds.length > 0 && (
+                                                <div className="bg-amber-50 rounded-2xl p-3 space-y-1.5">
+                                                    <p className="text-[10px] font-bold text-amber-600 mb-2">선택된 품목 (순서 = 사용자 표시 순서)</p>
+                                                    {packageItemIds.map((itemId, idx) => {
+                                                        const item = items.find(i => i.id === itemId);
+                                                        if (!item) return null;
+                                                        return (
+                                                            <div key={itemId} className="flex items-center gap-2 bg-white rounded-xl px-3 py-2">
+                                                                <span className="text-[10px] font-black text-amber-500 w-4">{idx + 1}</span>
+                                                                <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-bold">{CATEGORY_LABELS[item.category]}</span>
+                                                                <span className="text-xs font-medium text-gray-700 flex-1 truncate">{item.name}</span>
+                                                                <span className="text-xs font-bold text-blue-600">₩{item.price.toLocaleString()}</span>
+                                                                <button onClick={() => setPackageItemIds(prev => prev.filter(id => id !== itemId))} className="p-1 hover:bg-red-50 rounded-lg">
+                                                                    <X className="w-3 h-3 text-red-400" />
+                                                                </button>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+
+                                            {/* 품목 검색 & 필터 */}
+                                            <div className="flex gap-2">
+                                                <div className="flex-1 relative">
+                                                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                                    <input value={pkgSearchText} onChange={e => setPkgSearchText(e.target.value)} placeholder="품목 검색..."
+                                                           className="w-full bg-gray-50 border-none rounded-xl pl-8 pr-4 py-2.5 text-xs font-medium focus:ring-2 focus:ring-amber-400" />
+                                                </div>
+                                                <select value={pkgFilterCat} onChange={e => setPkgFilterCat(e.target.value)}
+                                                        className="bg-gray-50 border-none rounded-xl px-3 py-2.5 text-xs font-bold text-gray-600 focus:ring-2 focus:ring-amber-400">
+                                                    <option value="all">전체</option>
+                                                    {CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+                                                </select>
+                                            </div>
+
+                                            {/* 품목 목록 */}
+                                            <div className="max-h-64 overflow-y-auto space-y-1.5 border border-gray-100 rounded-2xl p-3">
+                                                {filteredPkgItems.length === 0 ? (
+                                                    <p className="text-xs text-gray-400 text-center py-6">해당 도시의 품목이 없습니다.</p>
+                                                ) : filteredPkgItems.map(item => {
+                                                    const isSelected = packageItemIds.includes(item.id);
+                                                    return (
+                                                        <div key={item.id} onClick={() => setPackageItemIds(prev => isSelected ? prev.filter(id => id !== item.id) : [...prev, item.id])}
+                                                             className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${isSelected ? 'bg-amber-50 border border-amber-200' : 'hover:bg-gray-50 border border-transparent'}`}>
+                                                            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${isSelected ? 'bg-amber-500 border-amber-500' : 'border-gray-300'}`}>
+                                                                {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+                                                            </div>
+                                                            {item.image && <img src={item.image} alt="" className="w-8 h-8 rounded-lg object-cover flex-shrink-0" onError={e => (e.currentTarget.style.display='none')} />}
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-bold">{CATEGORY_LABELS[item.category]}</span>
+                                                                    <span className="text-xs font-medium text-gray-800 truncate">{item.name}</span>
+                                                                </div>
+                                                                <p className="text-[10px] text-gray-400 truncate mt-0.5">{item.description}</p>
+                                                            </div>
+                                                            <span className="text-xs font-bold text-blue-600 flex-shrink-0">₩{item.price.toLocaleString()}</span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+
+                                        {/* 활성화 토글 */}
+                                        <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
+                                            <div>
+                                                <p className="text-sm font-bold text-gray-900">패키지 활성화</p>
+                                                <p className="text-[10px] text-gray-400">사용자 화면에서 추천됩니다</p>
+                                            </div>
+                                            <button onClick={() => setPackageForm({...packageForm, is_active: !packageForm.is_active})}
+                                                    className={`w-12 h-6 rounded-full transition-all relative ${packageForm.is_active ? 'bg-blue-600' : 'bg-gray-300'}`}>
+                                                <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all ${packageForm.is_active ? 'left-6' : 'left-0.5'}`} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="px-6 py-5 border-t bg-gray-50 flex gap-3 sticky bottom-0 z-10">
+                                        <button onClick={() => setShowPackageForm(false)} className="flex-1 py-3 text-gray-500 text-sm font-bold hover:bg-white rounded-2xl">취소</button>
+                                        <button onClick={handleSavePackage} disabled={savingPackage}
+                                                className="flex-1 py-3 bg-amber-500 text-white rounded-2xl text-sm font-black hover:bg-amber-600 disabled:opacity-50 active:scale-95">
+                                            {savingPackage ? '저장 중...' : editingPackage ? '수정 완료' : '패키지 등록'}
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </div>
