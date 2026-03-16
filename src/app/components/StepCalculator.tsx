@@ -475,6 +475,12 @@ export function StepCalculator() {
                   );
                 })}
 
+                {isAccommodationShortage() && (
+                    <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2">
+                      <p className="text-xs text-red-500">{t('calc.accommodation_nights_warning').replace('{n}', String(nights))}</p>
+                    </div>
+                )}
+
                 <button onClick={handleNext} className="w-full mt-4 py-4 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center gap-2 group hover:bg-gray-100 transition-all active:scale-[0.98]">
                   <span className="text-sm font-semibold text-gray-600 group-hover:text-blue-600">{canProceed ? t('calc.next_step_label') : t('calc.skip')}</span>
                   <ArrowLeft className="w-4 h-4 rotate-180 text-gray-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-all" />
