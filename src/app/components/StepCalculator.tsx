@@ -209,7 +209,11 @@ export function StepCalculator() {
     else navigate(`/${language}`);
   };
   const canProceed = selectedItemsInCurrentCategory.length > 0;
-  const isAccommodationShortage = (quantity: number) => currentCategory === 'accommodation' && hasDateRange && nights > 0 && quantity < nights;
+  const totalSelectedAccommodationNights = useMemo(
+    () => selectedItemsInCurrentCategory.reduce((sum, item) => sum + (itemQuantities[item.id] || 1), 0),
+    [selectedItemsInCurrentCategory, itemQuantities],
+  );
+  const isAccommodationShortage = () => currentCategory === 'accommodation' && hasDateRange && nights > 0 && totalSelectedAccommodationNights < nights;
 
   // ── 나라 선택 ──
   if (phase === 'selectCity') {
@@ -470,6 +474,12 @@ export function StepCalculator() {
                       </div>
                   );
                 })}
+
+                {isAccommodationShortage() && (
+                    <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2">
+                      <p className="text-xs text-red-500">{t('calc.accommodation_nights_warning').replace('{n}', String(nights))}</p>
+                    </div>
+                )}
 
                 <button onClick={handleNext} className="w-full mt-4 py-4 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center gap-2 group hover:bg-gray-100 transition-all active:scale-[0.98]">
                   <span className="text-sm font-semibold text-gray-600 group-hover:text-blue-600">{canProceed ? t('calc.next_step_label') : t('calc.skip')}</span>
