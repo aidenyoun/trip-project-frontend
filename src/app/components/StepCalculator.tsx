@@ -410,6 +410,11 @@ export function StepCalculator() {
                                   <span className="text-xs font-bold text-blue-700 ml-1">= ₩{(getEffectivePrice(selectedInGroup) * (itemQuantities[selectedInGroup.id] || 1)).toLocaleString()}</span>
                                 </div>
                               </div>
+                              {isAccommodationShortage(itemQuantities[selectedInGroup.id] || 1) && (
+                                  <p className="mt-2 rounded-md border border-red-100 bg-red-50 px-2 py-1 text-[11px] text-red-500">
+                                    {t('calc.accommodation_nights_warning').replace('{n}', String(nights))}
+                                  </p>
+                              )}
                             </div>
                         )}
                       </div>
@@ -459,6 +464,11 @@ export function StepCalculator() {
                                 <span className="text-[11px] text-blue-600 font-medium">{getUnitLabel(currentCategory, quantity)} {t('calc.basis')}{currentCategory === 'accommodation' && hasDateRange && quantity === nights && <span className="ml-1 text-blue-400">({t('calc.date_basis')})</span>}</span>
                                 <span className="text-[11px] text-blue-700 font-bold">{t('calc.total_cost_label')} ₩{totalItemPrice.toLocaleString()}</span>
                               </div>
+                              {isAccommodationShortage(quantity) && (
+                                  <p className="mt-1.5 rounded-md border border-red-100 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-500">
+                                    {t('calc.accommodation_nights_warning').replace('{n}', String(nights))}
+                                  </p>
+                              )}
                             </div>
                         )}
                       </div>
