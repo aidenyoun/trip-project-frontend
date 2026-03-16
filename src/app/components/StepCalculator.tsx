@@ -146,7 +146,7 @@ export function StepCalculator() {
       const newQty = { ...itemQuantities }; delete newQty[itemId]; setItemQuantities(newQty);
     } else {
       newSelected.add(itemId);
-      if (isQuantityCategory) { const dq = currentCategory === 'accommodation' && nights > 0 ? nights : 1; setItemQuantities(prev => ({ ...prev, [itemId]: dq })); }
+      if (isQuantityCategory) { setItemQuantities(prev => ({ ...prev, [itemId]: 1 })); }
     }
     setSelectedItems(newSelected);
   };
@@ -209,6 +209,7 @@ export function StepCalculator() {
     else navigate(`/${language}`);
   };
   const canProceed = selectedItemsInCurrentCategory.length > 0;
+  const isAccommodationShortage = (quantity: number) => currentCategory === 'accommodation' && hasDateRange && nights > 0 && quantity < nights;
 
   // ── 나라 선택 ──
   if (phase === 'selectCity') {
@@ -396,7 +397,7 @@ export function StepCalculator() {
                               <div className="flex items-center justify-between">
                                 <div>
                                   <p className="text-xs text-blue-700 font-bold">{getItemText(selectedInGroup).name}</p>
-                                  <p className="text-[11px] text-blue-500">{getUnitLabel(currentCategory, itemQuantities[selectedInGroup.id] || 1)} 기준</p>
+                                  <p className="text-[11px] text-blue-500">{getUnitLabel(currentCategory, itemQuantities[selectedInGroup.id] || 1)} {t('calc.basis')}</p>
                                 </div>
                                 <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                   <button onClick={e => changeQuantity(selectedInGroup.id, -1, e)} className="w-7 h-7 rounded-full bg-blue-200 hover:bg-blue-300 flex items-center justify-center active:scale-90"><Minus className="w-3.5 h-3.5 text-blue-700" /></button>
@@ -405,6 +406,11 @@ export function StepCalculator() {
                                   <span className="text-xs font-bold text-blue-700 ml-1">= ₩{(getEffectivePrice(selectedInGroup) * (itemQuantities[selectedInGroup.id] || 1)).toLocaleString()}</span>
                                 </div>
                               </div>
+                              {isAccommodationShortage(itemQuantities[selectedInGroup.id] || 1) && (
+                                  <p className="mt-2 rounded-md border border-red-100 bg-red-50 px-2 py-1 text-[11px] text-red-500">
+                                    {t('calc.accommodation_nights_warning').replace('{n}', String(nights))}
+                                  </p>
+                              )}
                             </div>
                         )}
                       </div>
@@ -454,6 +460,11 @@ export function StepCalculator() {
                                 <span className="text-[11px] text-blue-600 font-medium">{getUnitLabel(currentCategory, quantity)} {t('calc.basis')}{currentCategory === 'accommodation' && hasDateRange && quantity === nights && <span className="ml-1 text-blue-400">({t('calc.date_basis')})</span>}</span>
                                 <span className="text-[11px] text-blue-700 font-bold">{t('calc.total_cost_label')} ₩{totalItemPrice.toLocaleString()}</span>
                               </div>
+                              {isAccommodationShortage(quantity) && (
+                                  <p className="mt-1.5 rounded-md border border-red-100 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-500">
+                                    {t('calc.accommodation_nights_warning').replace('{n}', String(nights))}
+                                  </p>
+                              )}
                             </div>
                         )}
                       </div>

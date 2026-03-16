@@ -116,6 +116,7 @@ const translations = {
     'calc.basis': '기준',
     'calc.date_basis': '날짜 기준',
     'calc.total_cost_label': '총',
+    'calc.accommodation_nights_warning': '여행 일정은 {n}박입니다. 숙박 박수가 부족해요.',
 
     // KakaoPreview
     'preview.greeting': '안녕하세요! 😊\n선택하신 여행 견적서를 보내드립니다.',
@@ -230,6 +231,7 @@ const translations = {
     'calc.basis': 'basis',
     'calc.date_basis': 'by date',
     'calc.total_cost_label': 'Total',
+    'calc.accommodation_nights_warning': 'Your trip is {n} nights. Accommodation nights are currently short.',
 
     // KakaoPreview
     'preview.greeting': 'Hello! 😊\nHere is your personalized travel quote.',
@@ -344,6 +346,7 @@ const translations = {
     'calc.basis': '基準',
     'calc.date_basis': '日程基準',
     'calc.total_cost_label': '合計',
+    'calc.accommodation_nights_warning': '旅行日程は{n}泊です。宿泊泊数が不足しています。',
 
     // KakaoPreview
     'preview.greeting': 'こんにちは！ 😊\nお選びいただいた旅行見積書をお送りします。',
