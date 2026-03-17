@@ -21,7 +21,8 @@ const STEP_IDS = ['accommodation', 'transport', 'tours', 'activities'] as const;
 type StepId = typeof STEP_IDS[number];
 const QUANTITY_CATEGORIES: StepId[] = ['accommodation', 'transport', 'tours', 'activities'];
 type Phase = 'selectCity' | 'selectItems';
-type SortOption = 'name_asc' | 'name_desc' | 'price_asc' | 'price_desc';
+type SortField = 'name' | 'price';
+type SortDirection = 'asc' | 'desc';
 
 function emojiToFlagUrl(emoji: string): string | null {
   try {
@@ -67,7 +68,8 @@ export function StepCalculator() {
   const [monthlyPriceMap, setMonthlyPriceMap] = useState<Record<string, Record<number, number>>>({});
   const [translationMap, setTranslationMap] = useState<Record<string, { name: string; description: string }>>({});
   const [loading, setLoading] = useState(true);
-  const [sortOption, setSortOption] = useState<SortOption>('name_asc');
+  const [sortField, setSortField] = useState<SortField>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   const currentMonth = new Date().getMonth() + 1;
 
@@ -180,13 +182,13 @@ export function StepCalculator() {
       const nameDiff = getItemText(a).name.localeCompare(getItemText(b).name, languageLocale);
       const priceDiff = getEffectivePrice(a) - getEffectivePrice(b);
 
-      if (sortOption === 'price_asc') return priceDiff !== 0 ? priceDiff : nameDiff;
-      if (sortOption === 'price_desc') return priceDiff !== 0 ? -priceDiff : nameDiff;
-      if (sortOption === 'name_desc') return -nameDiff;
-      return nameDiff;
+      if (sortField === 'price') {
+        return sortDirection === 'asc' ? (priceDiff !== 0 ? priceDiff : nameDiff) : (priceDiff !== 0 ? -priceDiff : nameDiff);
+      }
+      return sortDirection === 'asc' ? nameDiff : -nameDiff;
     });
     return sorted;
-  }, [baseFilteredItems, sortOption, languageLocale, translationMap, monthlyPriceMap, currentMonth]);
+  }, [baseFilteredItems, sortField, sortDirection, languageLocale, translationMap, monthlyPriceMap, currentMonth]);
   const selectedItemsInCurrentCategory = filteredItems.filter(item => selectedItems.has(item.id));
 
   const { grouped: groupedMap, standalone } = useMemo(() => {
@@ -363,21 +365,28 @@ export function StepCalculator() {
             </div>
             <h2 className="text-lg font-semibold text-gray-900 mb-1">{getStepHeading()}</h2>
             <p className="text-sm text-gray-500">{getStepDesc()}</p>
-            <div className="mt-3">
-              <span className="text-[11px] text-gray-400">{t('calc.sort_by')}</span>
-              <div className="mt-1 grid grid-cols-2 gap-1.5">
-                <button onClick={() => setSortOption('name_asc')} className={`px-2.5 py-1.5 text-xs rounded-md transition-colors ${sortOption === 'name_asc' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-semibold' : 'bg-gray-100 text-gray-500 hover:text-gray-700 border border-transparent'}`}>
-                  {t('calc.sort_name_asc')}
-                </button>
-                <button onClick={() => setSortOption('name_desc')} className={`px-2.5 py-1.5 text-xs rounded-md transition-colors ${sortOption === 'name_desc' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-semibold' : 'bg-gray-100 text-gray-500 hover:text-gray-700 border border-transparent'}`}>
-                  {t('calc.sort_name_desc')}
-                </button>
-                <button onClick={() => setSortOption('price_asc')} className={`px-2.5 py-1.5 text-xs rounded-md transition-colors ${sortOption === 'price_asc' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-semibold' : 'bg-gray-100 text-gray-500 hover:text-gray-700 border border-transparent'}`}>
-                  {t('calc.sort_price_asc')}
-                </button>
-                <button onClick={() => setSortOption('price_desc')} className={`px-2.5 py-1.5 text-xs rounded-md transition-colors ${sortOption === 'price_desc' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-semibold' : 'bg-gray-100 text-gray-500 hover:text-gray-700 border border-transparent'}`}>
-                  {t('calc.sort_price_desc')}
-                </button>
+            <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-gray-400">{t('calc.sort_field')}</span>
+                <div className="inline-flex rounded-lg bg-white p-1 border border-gray-100">
+                  <button onClick={() => setSortField('name')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortField === 'name' ? 'bg-blue-50 text-blue-600 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
+                    {t('calc.sort_field_name')}
+                  </button>
+                  <button onClick={() => setSortField('price')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortField === 'price' ? 'bg-blue-50 text-blue-600 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
+                    {t('calc.sort_field_price')}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-gray-400">{t('calc.sort_order')}</span>
+                <div className="inline-flex rounded-lg bg-white p-1 border border-gray-100">
+                  <button onClick={() => setSortDirection('asc')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortDirection === 'asc' ? 'bg-blue-50 text-blue-600 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
+                    {t('calc.sort_order_asc')}
+                  </button>
+                  <button onClick={() => setSortDirection('desc')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortDirection === 'desc' ? 'bg-blue-50 text-blue-600 font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
+                    {t('calc.sort_order_desc')}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
