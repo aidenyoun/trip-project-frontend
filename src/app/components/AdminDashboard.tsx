@@ -344,6 +344,15 @@ export function AdminDashboard() {
     };
     const handleDeleteCity = async (id: string) => {
         if (!confirm(`'${id}' 도시를 삭제하면 관련 품목도 모두 삭제됩니다.`)) return;
+        const { data: cityItems } = await supabase.from('items').select('id').eq('city', id);
+        const cityItemIds = (cityItems || []).map((item: { id: string }) => item.id);
+
+        if (cityItemIds.length > 0) {
+            await supabase.from('clicks').delete().in('item_id', cityItemIds);
+            await supabase.from('item_monthly_prices').delete().in('item_id', cityItemIds);
+            await supabase.from('package_items').delete().in('item_id', cityItemIds);
+        }
+
         await supabase.from('items').delete().eq('city', id);
         await supabase.from('item_groups').delete().eq('city', id);
         await supabase.from('cities').delete().eq('id', id);
@@ -418,7 +427,9 @@ export function AdminDashboard() {
 
     const handleDeleteItem = async (id: string) => {
         if (!confirm('정말 삭제하시겠어요?')) return;
+        await supabase.from('clicks').delete().eq('item_id', id);
         await supabase.from('item_monthly_prices').delete().eq('item_id', id);
+        await supabase.from('package_items').delete().eq('item_id', id);
         await supabase.from('items').delete().eq('id', id);
         fetchItems();
     };
