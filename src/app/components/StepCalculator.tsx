@@ -21,6 +21,7 @@ const STEP_IDS = ['accommodation', 'transport', 'tours', 'activities'] as const;
 type StepId = typeof STEP_IDS[number];
 const QUANTITY_CATEGORIES: StepId[] = ['accommodation', 'transport', 'tours', 'activities'];
 type Phase = 'selectCity' | 'selectItems';
+type SortOption = 'name' | 'price';
 
 function emojiToFlagUrl(emoji: string): string | null {
   try {
@@ -66,6 +67,7 @@ export function StepCalculator() {
   const [monthlyPriceMap, setMonthlyPriceMap] = useState<Record<string, Record<number, number>>>({});
   const [translationMap, setTranslationMap] = useState<Record<string, { name: string; description: string }>>({});
   const [loading, setLoading] = useState(true);
+  const [sortOption, setSortOption] = useState<SortOption>('name');
 
   const currentMonth = new Date().getMonth() + 1;
 
@@ -103,6 +105,7 @@ export function StepCalculator() {
 
   const getEffectivePrice = (item: TravelItem) => monthlyPriceMap[item.id]?.[currentMonth] ?? item.price;
   const getItemText = (item: TravelItem) => { const tr = translationMap[item.id]; return { name: tr?.name || item.name, description: tr?.description || item.description }; };
+  const languageLocale = language === 'ko' ? 'ko-KR' : language === 'ja' ? 'ja-JP' : 'en-US';
 
   const nights = calcNights(travelStartDate, travelEndDate);
   const hasDateRange = !!(travelStartDate && travelEndDate);
@@ -146,7 +149,7 @@ export function StepCalculator() {
       const newQty = { ...itemQuantities }; delete newQty[itemId]; setItemQuantities(newQty);
     } else {
       newSelected.add(itemId);
-      if (isQuantityCategory) { const dq = currentCategory === 'accommodation' && nights > 0 ? nights : 1; setItemQuantities(prev => ({ ...prev, [itemId]: dq })); }
+      if (isQuantityCategory) { setItemQuantities(prev => ({ ...prev, [itemId]: 1 })); }
     }
     setSelectedItems(newSelected);
   };
@@ -170,7 +173,18 @@ export function StepCalculator() {
     else setItemQuantities(prev => ({ ...prev, [itemId]: next }));
   };
 
-  const filteredItems = allItems.filter(item => item.city === selectedCity?.id && item.category === currentCategory);
+  const baseFilteredItems = allItems.filter(item => item.city === selectedCity?.id && item.category === currentCategory);
+  const filteredItems = useMemo(() => {
+    const sorted = [...baseFilteredItems];
+    sorted.sort((a, b) => {
+      if (sortOption === 'price') {
+        const priceDiff = getEffectivePrice(a) - getEffectivePrice(b);
+        if (priceDiff !== 0) return priceDiff;
+      }
+      return getItemText(a).name.localeCompare(getItemText(b).name, languageLocale);
+    });
+    return sorted;
+  }, [baseFilteredItems, sortOption, languageLocale, translationMap, monthlyPriceMap, currentMonth]);
   const selectedItemsInCurrentCategory = filteredItems.filter(item => selectedItems.has(item.id));
 
   const { grouped: groupedMap, standalone } = useMemo(() => {
@@ -209,6 +223,11 @@ export function StepCalculator() {
     else navigate(`/${language}`);
   };
   const canProceed = selectedItemsInCurrentCategory.length > 0;
+  const totalSelectedAccommodationNights = useMemo(
+    () => selectedItemsInCurrentCategory.reduce((sum, item) => sum + (itemQuantities[item.id] || 1), 0),
+    [selectedItemsInCurrentCategory, itemQuantities],
+  );
+  const isAccommodationShortage = () => currentCategory === 'accommodation' && hasDateRange && nights > 0 && totalSelectedAccommodationNights < nights;
 
   // ── 나라 선택 ──
   if (phase === 'selectCity') {
@@ -342,6 +361,17 @@ export function StepCalculator() {
             </div>
             <h2 className="text-lg font-semibold text-gray-900 mb-1">{getStepHeading()}</h2>
             <p className="text-sm text-gray-500">{getStepDesc()}</p>
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-[11px] text-gray-400">{t('calc.sort_by')}</span>
+              <div className="inline-flex rounded-lg bg-gray-100 p-1">
+                <button onClick={() => setSortOption('name')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortOption === 'name' ? 'bg-white text-blue-600 shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {t('calc.sort_name')}
+                </button>
+                <button onClick={() => setSortOption('price')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortOption === 'price' ? 'bg-white text-blue-600 shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {t('calc.sort_price')}
+                </button>
+              </div>
+            </div>
           </div>
 
           {loading ? (
@@ -396,7 +426,7 @@ export function StepCalculator() {
                               <div className="flex items-center justify-between">
                                 <div>
                                   <p className="text-xs text-blue-700 font-bold">{getItemText(selectedInGroup).name}</p>
-                                  <p className="text-[11px] text-blue-500">{getUnitLabel(currentCategory, itemQuantities[selectedInGroup.id] || 1)} 기준</p>
+                                  <p className="text-[11px] text-blue-500">{getUnitLabel(currentCategory, itemQuantities[selectedInGroup.id] || 1)} {t('calc.basis')}</p>
                                 </div>
                                 <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                   <button onClick={e => changeQuantity(selectedInGroup.id, -1, e)} className="w-7 h-7 rounded-full bg-blue-200 hover:bg-blue-300 flex items-center justify-center active:scale-90"><Minus className="w-3.5 h-3.5 text-blue-700" /></button>
@@ -459,6 +489,12 @@ export function StepCalculator() {
                       </div>
                   );
                 })}
+
+                {isAccommodationShortage() && (
+                    <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2">
+                      <p className="text-xs text-red-500">{t('calc.accommodation_nights_warning').replace('{n}', String(nights))}</p>
+                    </div>
+                )}
 
                 <button onClick={handleNext} className="w-full mt-4 py-4 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center gap-2 group hover:bg-gray-100 transition-all active:scale-[0.98]">
                   <span className="text-sm font-semibold text-gray-600 group-hover:text-blue-600">{canProceed ? t('calc.next_step_label') : t('calc.skip')}</span>
