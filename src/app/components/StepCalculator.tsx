@@ -21,7 +21,7 @@ const STEP_IDS = ['accommodation', 'transport', 'tours', 'activities'] as const;
 type StepId = typeof STEP_IDS[number];
 const QUANTITY_CATEGORIES: StepId[] = ['accommodation', 'transport', 'tours', 'activities'];
 type Phase = 'selectCity' | 'selectItems';
-type SortOption = 'name' | 'price';
+type SortOption = 'name_asc' | 'name_desc' | 'price_asc' | 'price_desc';
 
 function emojiToFlagUrl(emoji: string): string | null {
   try {
@@ -67,7 +67,7 @@ export function StepCalculator() {
   const [monthlyPriceMap, setMonthlyPriceMap] = useState<Record<string, Record<number, number>>>({});
   const [translationMap, setTranslationMap] = useState<Record<string, { name: string; description: string }>>({});
   const [loading, setLoading] = useState(true);
-  const [sortOption, setSortOption] = useState<SortOption>('name');
+  const [sortOption, setSortOption] = useState<SortOption>('name_asc');
 
   const currentMonth = new Date().getMonth() + 1;
 
@@ -177,11 +177,13 @@ export function StepCalculator() {
   const filteredItems = useMemo(() => {
     const sorted = [...baseFilteredItems];
     sorted.sort((a, b) => {
-      if (sortOption === 'price') {
-        const priceDiff = getEffectivePrice(a) - getEffectivePrice(b);
-        if (priceDiff !== 0) return priceDiff;
-      }
-      return getItemText(a).name.localeCompare(getItemText(b).name, languageLocale);
+      const nameDiff = getItemText(a).name.localeCompare(getItemText(b).name, languageLocale);
+      const priceDiff = getEffectivePrice(a) - getEffectivePrice(b);
+
+      if (sortOption === 'price_asc') return priceDiff !== 0 ? priceDiff : nameDiff;
+      if (sortOption === 'price_desc') return priceDiff !== 0 ? -priceDiff : nameDiff;
+      if (sortOption === 'name_desc') return -nameDiff;
+      return nameDiff;
     });
     return sorted;
   }, [baseFilteredItems, sortOption, languageLocale, translationMap, monthlyPriceMap, currentMonth]);
@@ -361,14 +363,20 @@ export function StepCalculator() {
             </div>
             <h2 className="text-lg font-semibold text-gray-900 mb-1">{getStepHeading()}</h2>
             <p className="text-sm text-gray-500">{getStepDesc()}</p>
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3">
               <span className="text-[11px] text-gray-400">{t('calc.sort_by')}</span>
-              <div className="inline-flex rounded-lg bg-gray-100 p-1">
-                <button onClick={() => setSortOption('name')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortOption === 'name' ? 'bg-white text-blue-600 shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
-                  {t('calc.sort_name')}
+              <div className="mt-1 grid grid-cols-2 gap-1.5">
+                <button onClick={() => setSortOption('name_asc')} className={`px-2.5 py-1.5 text-xs rounded-md transition-colors ${sortOption === 'name_asc' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-semibold' : 'bg-gray-100 text-gray-500 hover:text-gray-700 border border-transparent'}`}>
+                  {t('calc.sort_name_asc')}
                 </button>
-                <button onClick={() => setSortOption('price')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortOption === 'price' ? 'bg-white text-blue-600 shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
-                  {t('calc.sort_price')}
+                <button onClick={() => setSortOption('name_desc')} className={`px-2.5 py-1.5 text-xs rounded-md transition-colors ${sortOption === 'name_desc' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-semibold' : 'bg-gray-100 text-gray-500 hover:text-gray-700 border border-transparent'}`}>
+                  {t('calc.sort_name_desc')}
+                </button>
+                <button onClick={() => setSortOption('price_asc')} className={`px-2.5 py-1.5 text-xs rounded-md transition-colors ${sortOption === 'price_asc' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-semibold' : 'bg-gray-100 text-gray-500 hover:text-gray-700 border border-transparent'}`}>
+                  {t('calc.sort_price_asc')}
+                </button>
+                <button onClick={() => setSortOption('price_desc')} className={`px-2.5 py-1.5 text-xs rounded-md transition-colors ${sortOption === 'price_desc' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-semibold' : 'bg-gray-100 text-gray-500 hover:text-gray-700 border border-transparent'}`}>
+                  {t('calc.sort_price_desc')}
                 </button>
               </div>
             </div>
