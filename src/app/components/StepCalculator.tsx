@@ -21,6 +21,7 @@ const STEP_IDS = ['accommodation', 'transport', 'tours', 'activities'] as const;
 type StepId = typeof STEP_IDS[number];
 const QUANTITY_CATEGORIES: StepId[] = ['accommodation', 'transport', 'tours', 'activities'];
 type Phase = 'selectCity' | 'selectItems';
+type SortOption = 'name' | 'price';
 
 function emojiToFlagUrl(emoji: string): string | null {
   try {
@@ -66,6 +67,7 @@ export function StepCalculator() {
   const [monthlyPriceMap, setMonthlyPriceMap] = useState<Record<string, Record<number, number>>>({});
   const [translationMap, setTranslationMap] = useState<Record<string, { name: string; description: string }>>({});
   const [loading, setLoading] = useState(true);
+  const [sortOption, setSortOption] = useState<SortOption>('name');
 
   const currentMonth = new Date().getMonth() + 1;
 
@@ -103,6 +105,7 @@ export function StepCalculator() {
 
   const getEffectivePrice = (item: TravelItem) => monthlyPriceMap[item.id]?.[currentMonth] ?? item.price;
   const getItemText = (item: TravelItem) => { const tr = translationMap[item.id]; return { name: tr?.name || item.name, description: tr?.description || item.description }; };
+  const languageLocale = language === 'ko' ? 'ko-KR' : language === 'ja' ? 'ja-JP' : 'en-US';
 
   const nights = calcNights(travelStartDate, travelEndDate);
   const hasDateRange = !!(travelStartDate && travelEndDate);
@@ -170,7 +173,18 @@ export function StepCalculator() {
     else setItemQuantities(prev => ({ ...prev, [itemId]: next }));
   };
 
-  const filteredItems = allItems.filter(item => item.city === selectedCity?.id && item.category === currentCategory);
+  const baseFilteredItems = allItems.filter(item => item.city === selectedCity?.id && item.category === currentCategory);
+  const filteredItems = useMemo(() => {
+    const sorted = [...baseFilteredItems];
+    sorted.sort((a, b) => {
+      if (sortOption === 'price') {
+        const priceDiff = getEffectivePrice(a) - getEffectivePrice(b);
+        if (priceDiff !== 0) return priceDiff;
+      }
+      return getItemText(a).name.localeCompare(getItemText(b).name, languageLocale);
+    });
+    return sorted;
+  }, [baseFilteredItems, sortOption, languageLocale, translationMap, monthlyPriceMap, currentMonth]);
   const selectedItemsInCurrentCategory = filteredItems.filter(item => selectedItems.has(item.id));
 
   const { grouped: groupedMap, standalone } = useMemo(() => {
@@ -347,6 +361,17 @@ export function StepCalculator() {
             </div>
             <h2 className="text-lg font-semibold text-gray-900 mb-1">{getStepHeading()}</h2>
             <p className="text-sm text-gray-500">{getStepDesc()}</p>
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-[11px] text-gray-400">{t('calc.sort_by')}</span>
+              <div className="inline-flex rounded-lg bg-gray-100 p-1">
+                <button onClick={() => setSortOption('name')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortOption === 'name' ? 'bg-white text-blue-600 shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {t('calc.sort_name')}
+                </button>
+                <button onClick={() => setSortOption('price')} className={`px-2.5 py-1 text-xs rounded-md transition-colors ${sortOption === 'price' ? 'bg-white text-blue-600 shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}>
+                  {t('calc.sort_price')}
+                </button>
+              </div>
+            </div>
           </div>
 
           {loading ? (

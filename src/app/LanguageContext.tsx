@@ -116,6 +116,9 @@ const translations = {
     'calc.basis': '기준',
     'calc.date_basis': '날짜 기준',
     'calc.total_cost_label': '총',
+    'calc.sort_by': '정렬',
+    'calc.sort_name': '이름순',
+    'calc.sort_price': '가격순',
     'calc.accommodation_nights_warning': '여행 일정은 {n}박입니다. 숙박 박수가 부족해요.',
 
     // KakaoPreview
@@ -231,6 +234,9 @@ const translations = {
     'calc.basis': 'basis',
     'calc.date_basis': 'by date',
     'calc.total_cost_label': 'Total',
+    'calc.sort_by': 'Sort',
+    'calc.sort_name': 'Name',
+    'calc.sort_price': 'Price',
     'calc.accommodation_nights_warning': 'Your trip is {n} nights. Accommodation nights are currently short.',
 
     // KakaoPreview
@@ -346,6 +352,9 @@ const translations = {
     'calc.basis': '基準',
     'calc.date_basis': '日程基準',
     'calc.total_cost_label': '合計',
+    'calc.sort_by': '並び替え',
+    'calc.sort_name': '名前順',
+    'calc.sort_price': '価格順',
     'calc.accommodation_nights_warning': '旅行日程は{n}泊です。宿泊泊数が不足しています。',
 
     // KakaoPreview
