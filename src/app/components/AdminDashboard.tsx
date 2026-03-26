@@ -251,24 +251,58 @@ export function AdminDashboard() {
                 !translatedMap.has(`${item.id}_en`) || !translatedMap.has(`${item.id}_ja`)
             ).map(i => i.id);
             if (untranslatedIds.length === 0) { alert('번역할 항목이 없습니다.'); return; }
+
             const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) {
+                alert('로그인이 만료되었습니다. 다시 로그인 후 시도해주세요.');
+                return;
+            }
+
             const total = untranslatedIds.length;
             const startTime = Date.now();
             const CHUNK_SIZE = 5;
+            let apiTranslated = 0;
+            let apiSkipped = 0;
+
             for (let i = 0; i < untranslatedIds.length; i += CHUNK_SIZE) {
                 const chunk = untranslatedIds.slice(i, i + CHUNK_SIZE);
                 setTranslateProgress({ current: Math.min(i + CHUNK_SIZE, total), total, startTime });
-                await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`, {
+
+                const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
                     body: JSON.stringify({ item_ids: chunk }),
                 });
+
+                if (!res.ok) {
+                    const detail = await res.text();
+                    throw new Error(`번역 함수 호출 실패 (${res.status}): ${detail}`);
+                }
+
+                const payload = await res.json().catch(() => ({} as any));
+                apiTranslated += Number(payload?.translated_count ?? payload?.translated ?? payload?.success_count ?? 0) || 0;
+                apiSkipped += Number(payload?.skipped_count ?? payload?.skipped ?? 0) || 0;
             }
+
             const { count: en } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'en');
             const { count: ja } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'ja');
             setTranslationStats(prev => ({ ...prev, translated_en: en || 0, translated_ja: ja || 0 }));
-            alert(`✅ 번역 완료: ${total}개 항목`);
-        } catch { alert('번역 중 오류 발생'); }
+
+            const beforeDone = Math.min(translationStats.translated_en, translationStats.translated_ja);
+            const afterDone = Math.min(en || 0, ja || 0);
+            const dbDelta = Math.max(0, afterDone - beforeDone);
+
+            if (dbDelta === 0 && apiTranslated > 0) {
+                alert(`⚠️ API 응답상 번역 ${apiTranslated}개 처리됐지만, 대시보드 집계는 증가하지 않았습니다. item_translations 조회 권한(RLS) 또는 함수 내부 저장 로직을 확인해주세요.`);
+            } else if (dbDelta === 0 && apiTranslated === 0) {
+                alert(`ℹ️ 번역 완료: 0개 (API skipped: ${apiSkipped}개). 이미 번역되었거나 함수가 항목을 건너뛴 상태일 수 있어요.`);
+            } else {
+                alert(`✅ 번역 완료: ${dbDelta}개 항목`);
+            }
+        } catch (err) {
+            console.error(err);
+            alert('번역 중 오류 발생 (함수 호출 실패 또는 권한 문제). 콘솔 로그를 확인해주세요.');
+        }
         finally { setTranslating(false); setTranslateProgress(null); }
     };
 
@@ -344,6 +378,15 @@ export function AdminDashboard() {
     };
     const handleDeleteCity = async (id: string) => {
         if (!confirm(`'${id}' 도시를 삭제하면 관련 품목도 모두 삭제됩니다.`)) return;
+        const { data: cityItems } = await supabase.from('items').select('id').eq('city', id);
+        const cityItemIds = (cityItems || []).map((item: { id: string }) => item.id);
+
+        if (cityItemIds.length > 0) {
+            await supabase.from('clicks').delete().in('item_id', cityItemIds);
+            await supabase.from('item_monthly_prices').delete().in('item_id', cityItemIds);
+            await supabase.from('package_items').delete().in('item_id', cityItemIds);
+        }
+
         await supabase.from('items').delete().eq('city', id);
         await supabase.from('item_groups').delete().eq('city', id);
         await supabase.from('cities').delete().eq('id', id);
@@ -418,7 +461,9 @@ export function AdminDashboard() {
 
     const handleDeleteItem = async (id: string) => {
         if (!confirm('정말 삭제하시겠어요?')) return;
+        await supabase.from('clicks').delete().eq('item_id', id);
         await supabase.from('item_monthly_prices').delete().eq('item_id', id);
+        await supabase.from('package_items').delete().eq('item_id', id);
         await supabase.from('items').delete().eq('id', id);
         fetchItems();
     };
