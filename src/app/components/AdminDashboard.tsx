@@ -261,6 +261,8 @@ export function AdminDashboard() {
             const total = untranslatedIds.length;
             const startTime = Date.now();
             const CHUNK_SIZE = 5;
+            let apiTranslated = 0;
+            let apiSkipped = 0;
 
             for (let i = 0; i < untranslatedIds.length; i += CHUNK_SIZE) {
                 const chunk = untranslatedIds.slice(i, i + CHUNK_SIZE);
@@ -276,13 +278,27 @@ export function AdminDashboard() {
                     const detail = await res.text();
                     throw new Error(`번역 함수 호출 실패 (${res.status}): ${detail}`);
                 }
+
+                const payload = await res.json().catch(() => ({} as any));
+                apiTranslated += Number(payload?.translated_count ?? payload?.translated ?? payload?.success_count ?? 0) || 0;
+                apiSkipped += Number(payload?.skipped_count ?? payload?.skipped ?? 0) || 0;
             }
 
             const { count: en } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'en');
             const { count: ja } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'ja');
             setTranslationStats(prev => ({ ...prev, translated_en: en || 0, translated_ja: ja || 0 }));
-            const actuallyDone = Math.max(0, Math.min((en || 0), (ja || 0)) - Math.min(translationStats.translated_en, translationStats.translated_ja));
-            alert(`✅ 번역 완료: ${actuallyDone}개 항목`);
+
+            const beforeDone = Math.min(translationStats.translated_en, translationStats.translated_ja);
+            const afterDone = Math.min(en || 0, ja || 0);
+            const dbDelta = Math.max(0, afterDone - beforeDone);
+
+            if (dbDelta === 0 && apiTranslated > 0) {
+                alert(`⚠️ API 응답상 번역 ${apiTranslated}개 처리됐지만, 대시보드 집계는 증가하지 않았습니다. item_translations 조회 권한(RLS) 또는 함수 내부 저장 로직을 확인해주세요.`);
+            } else if (dbDelta === 0 && apiTranslated === 0) {
+                alert(`ℹ️ 번역 완료: 0개 (API skipped: ${apiSkipped}개). 이미 번역되었거나 함수가 항목을 건너뛴 상태일 수 있어요.`);
+            } else {
+                alert(`✅ 번역 완료: ${dbDelta}개 항목`);
+            }
         } catch (err) {
             console.error(err);
             alert('번역 중 오류 발생 (함수 호출 실패 또는 권한 문제). 콘솔 로그를 확인해주세요.');
