@@ -251,24 +251,42 @@ export function AdminDashboard() {
                 !translatedMap.has(`${item.id}_en`) || !translatedMap.has(`${item.id}_ja`)
             ).map(i => i.id);
             if (untranslatedIds.length === 0) { alert('번역할 항목이 없습니다.'); return; }
+
             const { data: { session } } = await supabase.auth.getSession();
+            if (!session?.access_token) {
+                alert('로그인이 만료되었습니다. 다시 로그인 후 시도해주세요.');
+                return;
+            }
+
             const total = untranslatedIds.length;
             const startTime = Date.now();
             const CHUNK_SIZE = 5;
+
             for (let i = 0; i < untranslatedIds.length; i += CHUNK_SIZE) {
                 const chunk = untranslatedIds.slice(i, i + CHUNK_SIZE);
                 setTranslateProgress({ current: Math.min(i + CHUNK_SIZE, total), total, startTime });
-                await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`, {
+
+                const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
                     body: JSON.stringify({ item_ids: chunk }),
                 });
+
+                if (!res.ok) {
+                    const detail = await res.text();
+                    throw new Error(`번역 함수 호출 실패 (${res.status}): ${detail}`);
+                }
             }
+
             const { count: en } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'en');
             const { count: ja } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'ja');
             setTranslationStats(prev => ({ ...prev, translated_en: en || 0, translated_ja: ja || 0 }));
-            alert(`✅ 번역 완료: ${total}개 항목`);
-        } catch { alert('번역 중 오류 발생'); }
+            const actuallyDone = Math.max(0, Math.min((en || 0), (ja || 0)) - Math.min(translationStats.translated_en, translationStats.translated_ja));
+            alert(`✅ 번역 완료: ${actuallyDone}개 항목`);
+        } catch (err) {
+            console.error(err);
+            alert('번역 중 오류 발생 (함수 호출 실패 또는 권한 문제). 콘솔 로그를 확인해주세요.');
+        }
         finally { setTranslating(false); setTranslateProgress(null); }
     };
 
