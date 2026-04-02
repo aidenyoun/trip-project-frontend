@@ -266,22 +266,28 @@ export function AdminDashboard() {
 
             for (let i = 0; i < untranslatedIds.length; i += CHUNK_SIZE) {
                 const chunk = untranslatedIds.slice(i, i + CHUNK_SIZE);
-                setTranslateProgress({ current: Math.min(i + CHUNK_SIZE, total), total, startTime });
 
-                const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-                    body: JSON.stringify({ item_ids: chunk }),
-                });
+                for (let j = 0; j < chunk.length; j++) {
+                    const targetId = chunk[j];
+                    setTranslateProgress({ current: Math.min(i + j + 1, total), total, startTime });
 
-                if (!res.ok) {
-                    const detail = await res.text();
-                    throw new Error(`번역 함수 호출 실패 (${res.status}): ${detail}`);
+                    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-items`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+                        body: JSON.stringify({ item_id: targetId, item_ids: [targetId], ids: [targetId], langs: ['en', 'ja'] }),
+                    });
+
+                    if (!res.ok) {
+                        const detail = await res.text();
+                        throw new Error(`번역 함수 호출 실패 (${res.status}): ${detail}`);
+                    }
+
+                    const payload = await res.json().catch(() => ({} as any));
+                    const translated = Number(payload?.translated_count ?? payload?.translated ?? payload?.success_count ?? 0) || 0;
+                    const skipped = Number(payload?.skipped_count ?? payload?.skipped ?? 0) || 0;
+                    apiTranslated += translated;
+                    apiSkipped += skipped;
                 }
-
-                const payload = await res.json().catch(() => ({} as any));
-                apiTranslated += Number(payload?.translated_count ?? payload?.translated ?? payload?.success_count ?? 0) || 0;
-                apiSkipped += Number(payload?.skipped_count ?? payload?.skipped ?? 0) || 0;
             }
 
             const { count: en } = await supabase.from('item_translations').select('*', { count: 'exact', head: true }).eq('lang', 'en');
